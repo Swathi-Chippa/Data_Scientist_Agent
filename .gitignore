@@ -1,0 +1,20 @@
+.cadra/
+.opencode/
+dataagent/
+
+# Database files & SQLite WAL / SHM sidecars
+*.sqlite*
+*.db*
+data/
+
+# Python cache, virtual environments & test artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.env
+/DEVELOPMENT_HISTORY.md
