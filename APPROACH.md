@@ -58,6 +58,8 @@ flowchart TD
     FACT -->|"Mismatch Detected"| PURGE["Purge Claim / Template Fallback"]:::safety --> ENVELOPE
 ```
 
+> 📄 **Editable Draw.io Diagram:** An editable vector version of this diagram is maintained at [`docs/architecture.drawio.svg`](docs/architecture.drawio.svg) (or [`docs/architecture.drawio`](docs/architecture.drawio)).
+
 ---
 
 ## A. Problem Scoping
