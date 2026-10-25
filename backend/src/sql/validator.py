@@ -159,6 +159,7 @@ class SQLValidator:
         *,
         dialect: str = "duckdb",
         mode: ValidationMode = "enterprise",
+        columns: Iterable[str] | str | None = None,
     ) -> None:
         if isinstance(allowlist, str):
             allowlist = (allowlist,)
@@ -170,12 +171,40 @@ class SQLValidator:
         self._allowlist = frozenset(
             _normalize_identifier(name) for name in allowlist
         )
+        self._columns = self._parse_columns(columns)
         self.dialect = dialect
         self.mode = mode
 
     @property
     def allowlist(self) -> frozenset[str]:
         return self._allowlist
+
+    @property
+    def columns(self) -> frozenset[tuple[str, str]] | None:
+        return self._columns
+
+    @staticmethod
+    def _parse_columns(
+        columns: Iterable[str] | str | None,
+    ) -> frozenset[tuple[str, str]] | None:
+        if columns is None:
+            return None
+        if isinstance(columns, str):
+            columns = (columns,)
+        parsed: set[tuple[str, str]] = set()
+        for entry in columns:
+            parts = entry.split(".")
+            if len(parts) != 2 or not all(part.strip() for part in parts):
+                raise ValueError(
+                    "column allowlist entries must be 'table.column'"
+                )
+            parsed.add(
+                (
+                    _normalize_identifier(parts[0]),
+                    _normalize_identifier(parts[1]),
+                )
+            )
+        return frozenset(parsed)
 
     def validate(self, sql: str) -> ValidationResult:
         checks: list[ValidationCheck] = []
@@ -290,14 +319,21 @@ class SQLValidator:
                 if not self._table_is_allowed(table)
             }
         )
-        if unknown_tables:
+        unknown_columns = self._unknown_columns(ast)
+        if unknown_tables or unknown_columns:
+            if unknown_tables and unknown_columns:
+                reason = "table and column are outside the retrieved allowlist"
+            elif unknown_tables:
+                reason = "table is outside the retrieved allowlist"
+            else:
+                reason = "column is outside the retrieved allowlist"
             checks.append(
                 ValidationCheck(
                     id=4,
                     name="allowlist",
                     status="fail",
-                    reason="table is outside the retrieved allowlist",
-                    offending=tuple(unknown_tables),
+                    reason=reason,
+                    offending=tuple(unknown_tables) + unknown_columns,
                 )
             )
         else:
@@ -315,6 +351,163 @@ class SQLValidator:
         checks.append(self._limits_check(ast, root, core_ok))
 
         return self._result(checks)
+
+    def _unknown_columns(self, ast: exp.Expression) -> tuple[str, ...]:
+        if self._columns is None:
+            return ()
+
+        allowed_by_table: dict[str, set[str]] = {}
+        for table, column in self._columns:
+            allowed_by_table.setdefault(table, set()).add(column)
+        all_columns = {column for _, column in self._columns}
+
+        cte_names = {cte.alias_or_name.lower() for cte in ast.find_all(exp.CTE)}
+        alias_to_table: dict[str, str] = {}
+        for table in ast.find_all(exp.Table):
+            name = table.name
+            if not name:
+                continue
+            if not table.db and name.lower() in cte_names:
+                continue
+            physical = name.lower()
+            alias_to_table[physical] = physical
+            alias_to_table[table.alias_or_name.lower()] = physical
+
+        cte_outputs = {
+            cte.alias_or_name.lower(): self._cte_output_names(
+                cte, allowed_by_table, all_columns
+            )
+            for cte in ast.find_all(exp.CTE)
+        }
+        select_aliases = {
+            alias.alias.lower()
+            for alias in ast.find_all(exp.Alias)
+            if alias.alias
+        }
+        physical_tables = sorted(set(alias_to_table.values()))
+
+        unknown: set[str] = set()
+        for column in ast.find_all(exp.Column):
+            if isinstance(column.this, exp.Star):
+                continue
+            name = column.name.lower()
+            if not name:
+                continue
+            qualifier = column.table.lower()
+
+            if qualifier:
+                if qualifier in cte_outputs:
+                    outputs = cte_outputs[qualifier]
+                    if outputs:
+                        if name not in outputs:
+                            unknown.add(f"{qualifier}.{name}")
+                        continue
+                    table = alias_to_table.get(qualifier)
+                    if table is None or (table, name) not in self._columns:
+                        unknown.add(f"{qualifier}.{name}")
+                    continue
+
+                table = alias_to_table.get(qualifier)
+                if table is None:
+                    table = qualifier if qualifier in allowed_by_table else None
+                if table is None or (table, name) not in self._columns:
+                    unknown.add(
+                        f"{table}.{name}" if table is not None else f"{qualifier}.{name}"
+                    )
+                continue
+
+            if name in select_aliases:
+                continue
+
+            select = column.find_ancestor(exp.Select)
+            sources = self._select_sources(select) if select is not None else ()
+            cte_sources = [
+                source for source in sources if source in cte_outputs
+            ]
+            physical_sources = [
+                source
+                for source in sources
+                if source not in cte_outputs and source in allowed_by_table
+            ]
+            if cte_sources:
+                outputs = set().union(
+                    *(cte_outputs[source] for source in cte_sources)
+                )
+                if name in outputs:
+                    continue
+                if any(
+                    (source, name) in self._columns
+                    for source in physical_sources
+                ):
+                    continue
+                unknown.add(f"{cte_sources[0]}.{name}")
+                continue
+
+            if physical_sources:
+                if any(
+                    (source, name) in self._columns
+                    for source in physical_sources
+                ):
+                    continue
+                unknown.add(f"{physical_sources[0]}.{name}")
+                continue
+
+            if name in all_columns:
+                continue
+            if len(physical_tables) == 1:
+                unknown.add(f"{physical_tables[0]}.{name}")
+            else:
+                unknown.add(name)
+
+        return tuple(sorted(unknown))
+
+    @staticmethod
+    def _select_sources(select: exp.Select) -> tuple[str, ...]:
+        tables: list[str] = []
+        from_clause = select.args.get("from_") or select.args.get("from")
+        if from_clause is not None and isinstance(from_clause.this, exp.Table):
+            tables.append(from_clause.this.name.lower())
+        for join in select.args.get("joins") or ():
+            if isinstance(join.this, exp.Table):
+                tables.append(join.this.name.lower())
+        return tuple(tables)
+
+    def _cte_output_names(
+        self,
+        cte: exp.CTE,
+        allowed_by_table: dict[str, set[str]],
+        all_columns: set[str],
+    ) -> set[str]:
+        outputs: set[str] = set()
+        source = self._cte_source_table(cte)
+        for projection in cte.this.expressions if isinstance(cte.this, exp.Select) else ():
+            if isinstance(projection, exp.Alias):
+                outputs.add(projection.alias.lower())
+            elif isinstance(projection, exp.Star):
+                outputs.update(
+                    allowed_by_table.get(source, all_columns)
+                    if source is not None
+                    else all_columns
+                )
+            elif isinstance(projection, exp.Column) and isinstance(
+                projection.this, exp.Star
+            ):
+                outputs.update(
+                    allowed_by_table.get(source, all_columns)
+                    if source is not None
+                    else all_columns
+                )
+            elif isinstance(projection, exp.Column) and projection.name:
+                outputs.add(projection.name.lower())
+        return outputs
+
+    def _cte_source_table(self, cte: exp.CTE) -> str | None:
+        cte_names = {item.alias_or_name.lower() for item in cte.find_all(exp.CTE)}
+        for table in cte.this.find_all(exp.Table):
+            if not table.db and table.name.lower() in cte_names:
+                continue
+            return table.name.lower()
+        return None
 
     def _table_is_allowed(self, table: exp.Table) -> bool:
         bare = table.name.lower()

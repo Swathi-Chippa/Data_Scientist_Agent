@@ -220,3 +220,66 @@ def test_convenience_function_matches_the_class():
     sql = "SELECT id FROM orders LIMIT 10"
 
     assert validate_sql(sql, ALLOWLIST, dialect=DIALECT) == enterprise().validate(sql)
+
+
+def column_validator() -> SQLValidator:
+    return SQLValidator(
+        ("orders", "customers"),
+        dialect=DIALECT,
+        mode="enterprise",
+        columns=(
+            "orders.id",
+            "orders.customer_id",
+            "orders.amount",
+            "customers.id",
+            "customers.customer_state",
+        ),
+    )
+
+
+def test_rejects_a_column_outside_the_retrieved_allowlist():
+    result = column_validator().validate(
+        "SELECT id, secret FROM orders LIMIT 10"
+    )
+
+    assert result.approved is False
+    allowlist = check(result, "allowlist")
+    assert allowlist.status == "fail"
+    assert allowlist.offending == ("orders.secret",)
+
+
+def test_checks_qualified_columns_against_their_table():
+    valid = column_validator().validate(
+        "SELECT c.customer_state FROM orders AS o "
+        "JOIN customers AS c ON o.customer_id = c.id LIMIT 10"
+    )
+    invalid = column_validator().validate(
+        "SELECT o.customer_state FROM orders AS o LIMIT 10"
+    )
+
+    assert valid.approved is True
+    assert invalid.approved is False
+    assert check(invalid, "allowlist").offending == (
+        "orders.customer_state",
+    )
+
+
+def test_accepts_columns_produced_by_a_cte():
+    result = column_validator().validate(
+        "WITH recent AS ("
+        "  SELECT id, amount FROM orders"
+        ") "
+        "SELECT id, amount FROM recent LIMIT 10"
+    )
+
+    assert result.approved is True
+
+
+def test_rejects_a_cte_column_not_present_in_the_cte_projection():
+    result = column_validator().validate(
+        "WITH recent AS (SELECT id FROM orders) "
+        "SELECT id, amount FROM recent LIMIT 10"
+    )
+
+    assert result.approved is False
+    assert check(result, "allowlist").offending == ("recent.amount",)

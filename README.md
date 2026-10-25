@@ -4,7 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Pydantic v2](https://img.shields.io/badge/contracts-pydantic--v2-green.svg)](https://docs.pydantic.dev/)
 [![SQLGlot](https://img.shields.io/badge/parser-sqlglot-orange.svg)](https://github.com/tobymao/sqlglot)
-[![Tests Passing](https://img.shields.io/badge/tests-109%20passing-brightgreen.svg)](backend/tests/)
+[![Tests Passing](https://img.shields.io/badge/tests-170%20passing-brightgreen.svg)](backend/tests/)
 [![Security Invariants](https://img.shields.io/badge/security-read--only%20enforced-red.svg)](spec/requirements.md)
 
 ---
@@ -88,8 +88,8 @@ Generic text-to-SQL wrappers (such as single-prompt LLMs or monolithic agent fra
 * Compiles pre-vetted join paths using a Jinja2/AST template compiler in sub-second latency with 100% mathematical reproducibility.
 
 ### 🧠 Native 4-Stage NL2SQL Engine
-* **Schema Perceptor:** Employs concurrent worker threads for fuzzy value linking, resolving informal user terms (e.g., `"SP"` $\to$ `'customer_state = SP'`) before prompt creation.
-* **Generator:** Skeleton-of-thought CTE generation guided by top-$k$ In-Context Learning (ICL) exemplars.
+* **Schema Perceptor:** Deterministic exact/fuzzy value linking, resolving informal user terms (e.g., `"SP"` $\to$ `'customer_state = SP'`) before generation, with low-confidence and ambiguity clarification.
+* **Generator:** Deterministic skeleton-of-thought CTE generation using catalog-inferred join paths and frozen table/column allowlists.
 * **Bounded Reflector (Self-Repair):** Automatically heals execution and syntax errors from error logs. Strictly capped at **2 attempts** with a **frozen schema allowlist** to prevent runaway loops or scope creep.
 
 ### 📊 Pure-Python Statistical Analytics (AN-1)
@@ -116,7 +116,7 @@ Data_Scientist_Agent/
 │   │   ├── evidence/               # Evidence ledger & regex fact checker
 │   │   ├── router.py               # 3-Signal intent classifier & router
 │   │   └── app.py                  # FastAPI REST & SSE streaming server
-│   └── tests/                      # TDD test suites (109+ unit & integration tests)
+│   └── tests/                      # TDD test suites (170 unit & integration tests)
 │
 ├── frontend/                       # Web UI client & executive dashboard
 ├── spec/                           # Master engineering specifications & contracts
@@ -175,20 +175,19 @@ Data_Scientist_Agent/
 ### Running the Test Suite (TDD)
 Execute the comprehensive test suite verifying contracts, read-only gateway, Ingress Guard, and AST validation:
 ```bash
-python -m pytest backend/tests
+cd backend
+python -m pytest
 ```
 
 ```text
-============================= test session starts =============================
 platform win32 -- Python 3.14.7, pytest-9.1.1
-collected 109 items
+collected 170 items
 
-backend/tests/test_contracts.py .................................        [ 30%]
-backend/tests/test_gateway.py ..............                             [ 43%]
-backend/tests/test_guard.py ...................................          [ 75%]
-backend/tests/test_validator.py ...........................              [100%]
+........................................................................ [ 42%]
+........................................................................ [ 85%]
+..........................                                               [100%]
 
-============================= 109 passed in 0.46s =============================
+170 passed in 2.47s
 ```
 
 ---
@@ -200,9 +199,15 @@ backend/tests/test_validator.py ...........................              [100%]
   - Ingress Guard blocking prompt injection and DDL/DML tokens
   - Read-only SQLAlchemy gateway connected to `brazil_ecommerce.sqlite`
   - SQLGlot AST Validator with Dual-Mode Toggle (Enterprise vs. Benchmark)
-  - 109 Unit Tests passing (`tests/test_*.py`)
-- [ ] **Stage 2: Interactive Console REPL, Trace Logger & Baseline A (Sprint 2)**
+  - Test suite passing (`backend/tests/test_*.py`)
+- [x] **Stage 2: Interactive Console REPL, Trace Logger & Baseline A (Sprint 2)**
+  - Rich console REPL with read-only SQL, `ask`, `tables`, `mode`, and `help`
+  - Masked structured JSON traces for every run
 - [ ] **Stage 3: Native 4-Stage NL2SQL Engine & Bounded Reflector (Sprint 3)**
+  - [x] Schema catalog, answerability gate, and deterministic value perception
+  - [x] Deterministic CTE generator with inferred joins and frozen allowlists
+  - [x] Bounded self-repair with structured clarification
+  - [ ] Hybrid keyword/dense retrieval and cross-encoder reranking
 - [ ] **Stage 4: Deterministic Metric Compiler Fast-Path & Reconciler (Sprint 4)**
 - [ ] **Stage 5: End-to-End Orchestrator DAG & Analyst Harness (Sprint 5)**
 - [ ] **Stage 6: FastAPI Production Server, SSE Streaming & Evaluation Harness (Sprint 6)**
