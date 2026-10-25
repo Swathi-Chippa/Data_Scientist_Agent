@@ -13,6 +13,7 @@ if str(SRC_DIR) not in sys.path:
 from cli import CLI
 from contracts.models import GatewayConfig
 from gateway.connection import ConnectionManager
+from models.client import OllamaClient
 from trace_logger import TraceLogger
 
 DATABASE_PATH = (BACKEND_DIR / ".." / "brazil_ecommerce.sqlite").resolve()
@@ -30,6 +31,7 @@ def build_cli() -> CLI:
     return CLI(
         manager=manager,
         logger=TraceLogger(TRACE_DIR),
+        reasoning_client=OllamaClient(),
         max_rows=50,
     )
 

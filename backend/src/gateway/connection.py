@@ -76,7 +76,10 @@ class ConnectionManager:
         self._engine = create_engine(
             self._read_only_url,
             pool_size=config.connection_pool_size,
-            connect_args={"timeout": config.timeout_ms / 1000.0},
+            connect_args={
+                "timeout": config.timeout_ms / 1000.0,
+                "check_same_thread": False,
+            },
         )
 
     @property

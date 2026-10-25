@@ -1,12 +1,15 @@
 """Pydantic contracts shared across the backend pipeline.
 
-Field-for-field these follow ``spec/Interfaces.md``. The models are frozen and
-reject unknown fields so a step cannot quietly widen a contract that downstream
-steps, the trace, or the evaluator depend on.
+These follow ``spec/Interfaces.md`` and ``docs/Product.md`` 5.3. The models are
+frozen and reject unknown fields so a step cannot quietly widen a contract that
+downstream steps, the trace, or the evaluator depend on. ``TableRef`` keeps an
+optional ``rows`` extension for in-memory analyst execution; its required
+fields match the interface contract.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -21,6 +24,15 @@ ValidationMode = Literal["benchmark", "enterprise"]
 ValidationCheckStatus = Literal["pass", "fail", "skipped"]
 SqlOrigin = Literal["compiler", "generator", "repair"]
 RepairErrorKind = Literal["parse", "validation", "runtime", "reconciliation"]
+MetricCoverage = Literal["full", "partial", "none"]
+MetricTimeGrain = Literal["day", "week", "month", "quarter", "year"]
+MetricFilterOperator = Literal["=", "!=", ">", ">=", "<", "<=", "in"]
+JoinCardinality = Literal["1:1", "1:N", "N:1", "N:M"]
+ReconciliationStatus = Literal["pass", "flags"]
+ReconciliationCheckName = Literal[
+    "grain", "nulls", "duplicates", "ranges", "registry_total"
+]
+ReconciliationCheckStatus = Literal["pass", "flag"]
 ValidationCheckName = Literal[
     "parse",
     "single_select",
@@ -334,6 +346,619 @@ class RepairOutcome(ContractModel):
         return self
 
 
+class Period(ContractModel):
+    """A half-open reporting period: ``start`` inclusive, ``end`` exclusive."""
+
+    start: date
+    end: date
+
+    @model_validator(mode="after")
+    def _period_has_positive_length(self) -> Period:
+        if self.end <= self.start:
+            raise ValueError("period end must be after start")
+        return self
+
+
+class MetricAllowedDimension(ContractModel):
+    """A governed grouping dimension and the approved join path it requires."""
+
+    name: str = Field(min_length=1)
+    column: str = Field(min_length=1)
+    table: str = ""
+    join_edges: tuple[str, ...] = ()
+    synonyms: tuple[str, ...] = ()
+    time_grain: MetricTimeGrain | None = None
+
+
+class MetricJoinPath(ContractModel):
+    edge_id: str = Field(min_length=1)
+    cardinality: JoinCardinality
+
+
+class MetricReconciliation(ContractModel):
+    """The registry-owned cross-check query and its absolute tolerance."""
+
+    sql: str = Field(min_length=1)
+    tolerance: float = Field(default=0.0, ge=0.0)
+
+
+class MetricDefinition(ContractModel):
+    """A governed KPI definition (MET-1)."""
+
+    metric_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    synonyms: tuple[str, ...] = ()
+    formula: str = Field(min_length=1)
+    required_filters: tuple[str, ...] = ()
+    grain: tuple[str, ...] = ()
+    date_column: str = Field(min_length=1)
+    allowed_dimensions: tuple[MetricAllowedDimension, ...] = ()
+    base_table: str = Field(min_length=1)
+    join_path: tuple[MetricJoinPath, ...] = ()
+    reconciliation: MetricReconciliation | None = None
+    caveats: tuple[str, ...] = ()
+    version: int = Field(default=1, ge=1)
+    approved_by: str = "seed"
+    approved_at: str = "1970-01-01T00:00:00Z"
+
+
+class ResolvedDimension(ContractModel):
+    requested: str = Field(min_length=1)
+    allowed: bool
+    column: str | None = None
+    table: str | None = None
+    reason: str | None = None
+
+
+class MetricFilter(ContractModel):
+    table: str = Field(min_length=1)
+    column: str = Field(min_length=1)
+    operator: MetricFilterOperator = "="
+    value: str | tuple[str, ...]
+
+    @model_validator(mode="after")
+    def _operator_matches_value_shape(self) -> MetricFilter:
+        if self.operator == "in":
+            if not isinstance(self.value, tuple) or not self.value:
+                raise ValueError("an IN filter needs a non-empty tuple of values")
+        elif not isinstance(self.value, str):
+            raise ValueError("a scalar filter needs one string value")
+        return self
+
+
+class MetricResolution(ContractModel):
+    """Step 4 output and the compiler's input."""
+
+    coverage: MetricCoverage
+    metric_id: str | None = None
+    definition: MetricDefinition | None = None
+    resolved_dimensions: tuple[ResolvedDimension, ...] = ()
+    grain: str | None = None
+    date_column: str | None = None
+    required_filters: tuple[str, ...] = ()
+    caveats: tuple[str, ...] = ()
+    filters: tuple[MetricFilter, ...] = ()
+    period: Period | None = None
+    time_grain: MetricTimeGrain | None = None
+    reasoning: str | None = None
+    model: ModelUsage | None = None
+
+    @model_validator(mode="after")
+    def _full_resolution_names_a_definition(self) -> MetricResolution:
+        if self.coverage == "full":
+            if self.metric_id is None or self.definition is None:
+                raise ValueError(
+                    "a full metric resolution needs metric_id and definition"
+                )
+        if (
+            self.metric_id is not None
+            and self.definition is not None
+            and self.metric_id != self.definition.metric_id
+        ):
+            raise ValueError("metric_id must match definition.metric_id")
+        return self
+
+
+class ReconciliationComparison(ContractModel):
+    metric_id: str = Field(min_length=1)
+    observed: float
+    expected: float
+    tolerance: float = Field(ge=0.0)
+    within: bool
+
+
+class ReconciliationCheck(ContractModel):
+    name: ReconciliationCheckName
+    status: ReconciliationCheckStatus
+    detail: str | None = None
+
+
+class ReconciliationResult(ContractModel):
+    """Step 10 output (SQL-10, MET-5)."""
+
+    status: ReconciliationStatus
+    checks: tuple[ReconciliationCheck, ...] = ()
+    registry_comparison: ReconciliationComparison | None = None
+    caveats: tuple[str, ...] = ()
+    retry_used: bool = False
+    diagnosis: str | None = None
+
+    @model_validator(mode="after")
+    def _flags_need_a_caveat(self) -> ReconciliationResult:
+        if self.status == "flags" and not self.caveats:
+            raise ValueError("a flagged reconciliation result needs a caveat")
+        if self.status == "pass" and self.caveats:
+            raise ValueError("a passing reconciliation result cannot have caveats")
+        return self
+
+
+RouteLabel = Literal[
+    "lookup",
+    "anomaly",
+    "driver",
+    "risk",
+    "clarify",
+    "refused",
+    "blocked",
+]
+IntentLabel = Literal[
+    "Descriptive",
+    "Comparative",
+    "Diagnostic",
+    "Prescriptive",
+]
+AnalystColumnRole = Literal["dimension", "measure", "time", "key", "label"]
+AnomalyVerdict = Literal[
+    "unusual", "within_normal_range", "insufficient_evidence"
+]
+AnomalyPersistence = Literal["one_off", "sustained", "drift", "unknown"]
+AnalystStatus = Literal["ok", "insufficient_evidence"]
+OrchestrationStatus = Literal[
+    "ok",
+    "clarification",
+    "refused",
+    "blocked",
+    "insufficient_evidence",
+    "error",
+]
+PlanStepStatus = Literal["pending", "completed", "skipped", "failed"]
+
+
+class TimeSlot(ContractModel):
+    raw: str = ""
+    current: Period | None = None
+    comparison: Period | None = None
+    grain: str | None = None
+
+
+class SlotFilter(ContractModel):
+    term: str = Field(min_length=1)
+    value_phrase: str = Field(min_length=1)
+
+
+class RouteSlots(ContractModel):
+    metric_terms: tuple[str, ...] = ()
+    dimensions: tuple[str, ...] = ()
+    filters: tuple[SlotFilter, ...] = ()
+    time: TimeSlot = Field(default_factory=TimeSlot)
+    action_intent: bool = False
+
+
+class RulesSignal(ContractModel):
+    matched: tuple[str, ...] = ()
+    label: RouteLabel | None = None
+
+
+class ClassifierSignal(ContractModel):
+    label: RouteLabel | None = None
+    prob: float = Field(default=0.0, ge=0.0, le=1.0)
+    metric_terms: tuple[str, ...] = ()
+    dimensions: tuple[str, ...] = ()
+
+
+class ModelRouteSignal(ContractModel):
+    proposed_label: RouteLabel | None = None
+    slots: RouteSlots | None = None
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reasoning: str | None = None
+    usage: ModelUsage | None = None
+
+
+class RouterSignals(ContractModel):
+    rules: RulesSignal = Field(default_factory=RulesSignal)
+    classifier: ClassifierSignal = Field(default_factory=ClassifierSignal)
+    model: ModelRouteSignal | None = None
+    agreement: bool = False
+
+
+class RouterResult(ContractModel):
+    route_labels: tuple[RouteLabel, ...] = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    intent_label: IntentLabel
+    slots: RouteSlots = Field(default_factory=RouteSlots)
+    signals: RouterSignals = Field(default_factory=RouterSignals)
+    reason: str = Field(min_length=1)
+    clarification: ClarificationResult | None = None
+
+    @property
+    def primary_route(self) -> RouteLabel:
+        return self.route_labels[0]
+
+    @model_validator(mode="after")
+    def _clarification_matches_confidence(self) -> RouterResult:
+        if "clarify" in self.route_labels and self.clarification is None:
+            raise ValueError("a clarify route needs a clarification envelope")
+        if "blocked" in self.route_labels and len(self.route_labels) != 1:
+            raise ValueError("a blocked route cannot carry another route label")
+        if self.confidence < 0.70 and self.route_labels != ("clarify",):
+            raise ValueError("routing below 0.70 must be a clarification")
+        return self
+
+
+class AnalystColumn(ContractModel):
+    name: str = Field(min_length=1)
+    type: str = Field(min_length=1)
+    role: AnalystColumnRole
+
+
+class TableRef(ContractModel):
+    query_id: str = Field(min_length=1)
+    columns: tuple[AnalystColumn, ...] = ()
+    row_count: int = Field(default=0, ge=0)
+    uri: str = Field(min_length=1)
+    rows: tuple[tuple[Any, ...], ...] = ()
+
+    @model_validator(mode="after")
+    def _rows_match_columns(self) -> TableRef:
+        width = len(self.columns)
+        if self.rows and width and any(len(row) != width for row in self.rows):
+            raise ValueError("every TableRef row must match its columns")
+        if self.rows and self.row_count != len(self.rows):
+            raise ValueError("row_count must match the number of rows")
+        return self
+
+
+class AnalystInput(ContractModel):
+    module: Literal["anomaly", "driver", "risk"]
+    params: dict[str, Any] = Field(default_factory=dict)
+    tables: dict[str, TableRef] = Field(default_factory=dict)
+    metric: MetricDefinition | None = None
+    run_id: str = Field(min_length=1)
+    seed: int | None = None
+
+
+class AnomalyParams(ContractModel):
+    metric: str = Field(min_length=1)
+    grain: MetricTimeGrain = "month"
+    test_window: Period
+    history_window: Period | None = None
+    series_dimension: str | None = None
+    alpha: float = Field(default=0.05, gt=0.0, lt=0.5)
+    min_volume: float = Field(default=0.0, ge=0.0)
+    use_calendar: bool = False
+
+
+class AnomalyResult(ContractModel):
+    verdict: AnomalyVerdict
+    window: str = Field(min_length=1)
+    actual: float
+    expected: float
+    expected_range: tuple[float, float]
+    deviation_pct: float
+    robust_score: float
+    persistence: AnomalyPersistence
+    threshold: float = Field(ge=0.0)
+    correction_used: str | None = None
+    calendar_effects: tuple[str, ...] = ()
+    baseline_kind: Literal["seasonal", "robust_trailing"]
+
+    @model_validator(mode="after")
+    def _range_is_ordered(self) -> AnomalyResult:
+        if self.expected_range[0] > self.expected_range[1]:
+            raise ValueError("expected_range must be ordered low to high")
+        return self
+
+
+class DriverContribution(ContractModel):
+    dimension: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+    contribution: float
+    share: float
+    interval: tuple[float, float]
+    sample_size: int = Field(ge=0)
+    unstable: bool
+    grade: int = Field(ge=0, le=4)
+    data_needed_to_strengthen: tuple[str, ...] = ()
+
+
+class DriverResult(ContractModel):
+    metric: str = Field(min_length=1)
+    current_period: str = Field(min_length=1)
+    comparison_period: str = Field(min_length=1)
+    total_change: float
+    drivers: tuple[DriverContribution, ...] = ()
+    reconciliation_error: float
+    candidates_examined: int = Field(ge=0)
+    correction_used: str | None = None
+
+
+class AnalystArtifact(ContractModel):
+    artifact_id: str = Field(min_length=1)
+    kind: Literal["chart_data", "table", "model_card"]
+    uri: str = Field(min_length=1)
+
+
+class AnalystOutput(ContractModel):
+    module: Literal["anomaly", "driver", "risk"]
+    status: AnalystStatus
+    reason: str | None = None
+    result: AnomalyResult | DriverResult | None = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    assumptions: tuple[str, ...] = ()
+    sources: tuple[str, ...] = ()
+    artifacts: tuple[AnalystArtifact, ...] = ()
+
+    @model_validator(mode="after")
+    def _status_matches_payload(self) -> AnalystOutput:
+        if self.status == "ok" and self.result is None:
+            raise ValueError("an ok analyst output needs a typed result")
+        if self.status != "ok" and self.result is not None:
+            raise ValueError("a non-ok analyst output cannot carry a result")
+        if self.status == "insufficient_evidence" and not self.reason:
+            raise ValueError("insufficient evidence needs a reason")
+        return self
+
+
+class ExecutionBudget(ContractModel):
+    max_queries: int = Field(default=3, ge=0)
+    max_tokens: int = Field(default=4096, ge=0)
+    max_wall_ms: int = Field(default=10_000, ge=1)
+
+
+class BudgetUsage(ContractModel):
+    queries: int = Field(default=0, ge=0)
+    tokens: int = Field(default=0, ge=0)
+    wall_ms: int = Field(default=0, ge=0)
+
+
+class QueryRecord(ContractModel):
+    query_id: str = Field(min_length=1)
+    purpose: str = Field(min_length=1)
+    sql: str = Field(min_length=1)
+    status: ExecutionStatus
+    row_count: int = Field(ge=0)
+    duration_ms: int = Field(ge=0)
+
+
+class PlanStep(ContractModel):
+    step_id: str = Field(min_length=1)
+    module: str = Field(min_length=1)
+    depends_on: tuple[str, ...] = ()
+    status: PlanStepStatus = "pending"
+    detail: str | None = None
+
+
+class OrchestrationResult(ContractModel):
+    status: OrchestrationStatus
+    route_labels: tuple[RouteLabel, ...] = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    intent_label: IntentLabel
+    reason: str = Field(min_length=1)
+    router: RouterResult
+    clarification: ClarificationResult | None = None
+    refusal: str | None = None
+    candidate: SqlCandidate | None = None
+    validation: ValidationResult | None = None
+    execution: ExecutionResult | None = None
+    executions: tuple[ExecutionResult, ...] = ()
+    reconciliation: ReconciliationResult | None = None
+    analyst_outputs: tuple[AnalystOutput, ...] = ()
+    queries: tuple[QueryRecord, ...] = ()
+    budget: BudgetUsage = Field(default_factory=BudgetUsage)
+    plan: tuple[PlanStep, ...] = ()
+    latency_ms: int = Field(ge=0)
+
+    @property
+    def primary_route(self) -> RouteLabel:
+        return self.route_labels[0]
+
+
+class AskRequest(ContractModel):
+    question: str = Field(min_length=1)
+    session_id: str = Field(min_length=1)
+    clarification_of: str | None = None
+
+    @field_validator("question")
+    @classmethod
+    def _question_is_trimmed(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("question must not be blank")
+        return cleaned
+
+
+class AskResponse(ContractModel):
+    contract_version: str = "1.0.0"
+    run_id: str = Field(min_length=1)
+
+
+RunStatus = Literal[
+    "answered",
+    "clarify",
+    "refused",
+    "blocked",
+    "insufficient_evidence",
+    "error",
+]
+ClaimKind = Literal[
+    "fact",
+    "concentration",
+    "co_movement",
+    "comparison",
+    "consistent_with",
+    "hypothesis",
+]
+FactCheckViolationKind = Literal[
+    "number_not_in_ledger",
+    "causal_language_without_grade4",
+    "claim_without_source",
+    "grade_exceeded",
+]
+FactCheckAction = Literal["pass", "repaired", "template_fallback"]
+
+
+class ClaimNumber(ContractModel):
+    token: str = Field(min_length=1)
+    value: float
+    unit: str | None = None
+
+
+class ClaimSource(ContractModel):
+    type: Literal["query", "artifact"]
+    id: str = Field(min_length=1)
+
+
+class LedgerClaim(ContractModel):
+    claim_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    numbers: tuple[ClaimNumber, ...] = ()
+    source: ClaimSource
+    grade: int = Field(ge=0, le=4)
+    kind: ClaimKind
+
+
+class DroppedClaim(ContractModel):
+    text: str = Field(min_length=1)
+    reason: Literal["no_source", "grade_too_low_for_wording"]
+
+
+class Ledger(ContractModel):
+    run_id: str = Field(min_length=1)
+    claims: tuple[LedgerClaim, ...] = ()
+    dropped: tuple[DroppedClaim, ...] = ()
+    hypotheses: tuple[str, ...] = ()
+
+
+class FactCheckViolation(ContractModel):
+    sentence: str = Field(min_length=1)
+    kind: FactCheckViolationKind
+    token: str | None = None
+    claim_id: str | None = None
+
+
+class FactCheckResult(ContractModel):
+    passed: bool
+    violations: tuple[FactCheckViolation, ...] = ()
+    repaired_narrative: str | None = None
+    action: FactCheckAction
+
+    @model_validator(mode="after")
+    def _action_matches_violations(self) -> FactCheckResult:
+        if self.passed and self.violations:
+            raise ValueError("a passing fact check cannot carry violations")
+        if not self.passed and not self.violations:
+            raise ValueError("a failed fact check needs at least one violation")
+        return self
+
+
+class EnvelopeScope(ContractModel):
+    metric: str | None = None
+    window: str | None = None
+    filters: tuple[str, ...] = ()
+    grain: str | None = None
+    data_range: str | None = None
+    governed: bool = False
+
+
+class EnvelopeQueryRecord(ContractModel):
+    query_id: str = Field(min_length=1)
+    sql: str = Field(min_length=1)
+    status: Literal["ok", "rejected", "error"]
+    duration_ms: int = Field(ge=0)
+    rows_scanned: int | None = Field(default=None, ge=0)
+    est_cost: float | None = Field(default=None, ge=0)
+    origin: Literal["compiler", "generator", "repair"]
+    repair_of: str | None = None
+    validation_mode: ValidationMode | None = None
+
+
+class EvidenceBlock(ContractModel):
+    module: Literal["lookup", "anomaly", "driver", "risk"]
+    output: Any
+    source_claims: tuple[str, ...] = ()
+
+
+class ActionOption(ContractModel):
+    action_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    rank: int = Field(ge=1)
+    assumptions: tuple[str, ...] = ()
+    trade_offs: tuple[str, ...] = ()
+    sensitivity: str = ""
+    monitor: tuple[str, ...] = ()
+    data_that_would_change_ranking: tuple[str, ...] = ()
+    kind: Literal["intervention", "information_gathering"]
+
+
+class MethodStep(ContractModel):
+    name: str = Field(min_length=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class RouteSummary(ContractModel):
+    labels: tuple[str, ...] = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason: str = Field(min_length=1)
+
+
+class RefusalBlock(ContractModel):
+    missing: tuple[str, ...] = ()
+    closest_answerable: str | None = None
+
+
+class BlockBlock(ContractModel):
+    reason: GuardReason
+    detail: str = Field(min_length=1)
+
+
+class RunMetrics(ContractModel):
+    latency_ms: int = Field(ge=0)
+    tokens: int = Field(ge=0)
+    queries: int = Field(ge=0)
+    rows: int = Field(ge=0)
+    retries: int = Field(default=0, ge=0)
+
+
+class Provenance(ContractModel):
+    model_name: str = ""
+    model_version: str = ""
+    commit: str = ""
+    snapshot_id: str = ""
+    catalog_version: str = ""
+    timestamp: str = Field(min_length=1)
+
+
+class AnswerEnvelope(ContractModel):
+    contract_version: str = "1.0.0"
+    run_id: str = Field(min_length=1)
+    status: RunStatus
+    route: RouteSummary
+    conclusion: str | None = None
+    scope: EnvelopeScope = Field(default_factory=EnvelopeScope)
+    evidence: tuple[EvidenceBlock, ...] = ()
+    claims: tuple[LedgerClaim, ...] = ()
+    method: tuple[MethodStep, ...] = ()
+    queries: tuple[EnvelopeQueryRecord, ...] = ()
+    caveats: tuple[str, ...] = ()
+    causal_boundary_note: str | None = None
+    next_actions: tuple[ActionOption, ...] = ()
+    clarification: ClarificationResult | None = None
+    refusal: RefusalBlock | None = None
+    block: BlockBlock | None = None
+    run_metrics: RunMetrics
+    provenance: Provenance
+
+
 __all__ = [
     "AllowlistedColumn",
     "ClarificationResult",
@@ -359,7 +984,25 @@ __all__ = [
     "GatewayConfig",
     "GuardReason",
     "GuardResult",
+    "JoinCardinality",
     "LinkedValue",
+    "MetricAllowedDimension",
+    "MetricCoverage",
+    "MetricDefinition",
+    "MetricFilter",
+    "MetricFilterOperator",
+    "MetricJoinPath",
+    "MetricReconciliation",
+    "MetricResolution",
+    "MetricTimeGrain",
+    "Period",
+    "ReconciliationCheck",
+    "ReconciliationCheckName",
+    "ReconciliationCheckStatus",
+    "ReconciliationComparison",
+    "ReconciliationResult",
+    "ReconciliationStatus",
+    "ResolvedDimension",
     "PerceptionResult",
     "PerceptorConfig",
     "ValidationCheck",
@@ -367,4 +1010,58 @@ __all__ = [
     "ValidationCheckStatus",
     "ValidationMode",
     "ValidationResult",
+    "AnalystArtifact",
+    "AnalystColumn",
+    "AnalystColumnRole",
+    "AnalystInput",
+    "AnalystOutput",
+    "AnalystStatus",
+    "AnomalyParams",
+    "AnomalyPersistence",
+    "AnomalyResult",
+    "AnomalyVerdict",
+    "BudgetUsage",
+    "ClassifierSignal",
+    "DriverContribution",
+    "DriverResult",
+    "ExecutionBudget",
+    "IntentLabel",
+    "ModelRouteSignal",
+    "OrchestrationResult",
+    "OrchestrationStatus",
+    "PlanStep",
+    "PlanStepStatus",
+    "QueryRecord",
+    "RouteLabel",
+    "RouteSlots",
+    "RouterResult",
+    "RouterSignals",
+    "RulesSignal",
+    "SlotFilter",
+    "TableRef",
+    "TimeSlot",
+    "ActionOption",
+    "AnswerEnvelope",
+    "AskRequest",
+    "AskResponse",
+    "BlockBlock",
+    "ClaimKind",
+    "ClaimNumber",
+    "ClaimSource",
+    "DroppedClaim",
+    "EnvelopeQueryRecord",
+    "EnvelopeScope",
+    "EvidenceBlock",
+    "FactCheckAction",
+    "FactCheckResult",
+    "FactCheckViolation",
+    "FactCheckViolationKind",
+    "Ledger",
+    "LedgerClaim",
+    "MethodStep",
+    "Provenance",
+    "RefusalBlock",
+    "RouteSummary",
+    "RunMetrics",
+    "RunStatus",
 ]

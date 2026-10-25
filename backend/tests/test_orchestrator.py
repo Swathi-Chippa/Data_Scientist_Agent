@@ -1,0 +1,245 @@
+"""Stage 5 orchestration tests (RTE-1, RTE-3, OPS-2, ANA-1)."""
+
+from __future__ import annotations
+
+from datetime import date
+
+from analysts.harness import AnalystHarness
+from catalog import MetricRegistry
+from catalog.metric_resolver import MetricResolver
+from contracts.models import (
+    AnomalyResult,
+    ExecutionBudget,
+    ExecutionColumn,
+    ExecutionResult,
+    GuardResult,
+)
+from orchestrator import Orchestrator
+from router import Router
+from schema_retriever.catalog import CatalogColumn, CatalogTable, SchemaCatalog
+from sql.compiler import SQLCompiler
+from sql.reconciler import Reconciler
+
+
+class NoCallClient:
+    def chat_json(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("stage-5 tests must not call the model")
+
+
+class FakeExecutor:
+    def __init__(self, series=None, scalar=123):
+        self.series = series or _default_series()
+        self.scalar = scalar
+        self.sqls: list[str] = []
+        self.query_ids: list[str] = []
+
+    def execute(self, sql: str, *, query_id: str) -> ExecutionResult:
+        self.sqls.append(sql)
+        self.query_ids.append(query_id)
+        if "strftime('%Y-%m'" in sql:
+            columns = (
+                ExecutionColumn(name="month", type="TEXT"),
+                ExecutionColumn(name="order_count", type="INTEGER"),
+            )
+            rows = self.series
+        else:
+            columns = (ExecutionColumn(name="order_count", type="INTEGER"),)
+            rows = ((self.scalar,),)
+        return ExecutionResult(
+            query_id=query_id,
+            status="ok",
+            columns=columns,
+            row_count=len(rows),
+            rows=tuple(rows),
+            duration_ms=2,
+        )
+
+
+def _default_series():
+    rows = []
+    year, month = 2016, 9
+    for _ in range(24):
+        value = 20 if (year, month) == (2018, 8) else 100
+        rows.append((f"{year:04d}-{month:02d}", value))
+        month += 1
+        if month == 13:
+            month = 1
+            year += 1
+    return tuple(rows)
+
+
+def _catalog() -> SchemaCatalog:
+    return SchemaCatalog(
+        version="orchestrator-test",
+        tables=(
+            CatalogTable(
+                name="orders",
+                columns=(
+                    CatalogColumn(name="order_id", data_type="TEXT"),
+                    CatalogColumn(name="customer_id", data_type="TEXT"),
+                    CatalogColumn(name="order_status", data_type="TEXT"),
+                    CatalogColumn(
+                        name="order_purchase_timestamp",
+                        data_type="TEXT",
+                    ),
+                ),
+            ),
+            CatalogTable(
+                name="customers",
+                columns=(
+                    CatalogColumn(name="customer_id", data_type="TEXT"),
+                    CatalogColumn(name="customer_state", data_type="TEXT"),
+                ),
+            ),
+            CatalogTable(
+                name="order_payments",
+                columns=(
+                    CatalogColumn(name="order_id", data_type="TEXT"),
+                    CatalogColumn(name="payment_value", data_type="REAL"),
+                ),
+            ),
+        ),
+    )
+
+
+def _orchestrator(executor, budget=None) -> Orchestrator:
+    catalog = _catalog()
+    registry = MetricRegistry.default()
+    router = Router(
+        catalog=catalog,
+        registry=registry,
+        client=NoCallClient(),
+        reference_date=date(2026, 10, 25),
+    )
+    return Orchestrator(
+        executor=executor,
+        router=router,
+        registry=registry,
+        metric_resolver=MetricResolver(
+            registry,
+            client=NoCallClient(),
+            use_model=False,
+        ),
+        compiler=SQLCompiler(catalog),
+        reconciler=Reconciler(),
+        harness=AnalystHarness(),
+        budget=budget,
+    )
+
+
+def test_diagnostic_run_executes_one_series_query_and_anomaly():
+    executor = FakeExecutor()
+    outcome = _orchestrator(executor).run(
+        "Why did orders drop in August 2018?"
+    )
+
+    assert outcome.status == "ok"
+    assert outcome.route_labels[0] == "anomaly"
+    assert outcome.intent_label == "Diagnostic"
+    assert len(outcome.queries) == 1
+    assert outcome.queries[0].purpose == "series"
+    assert "strftime('%Y-%m'" in outcome.queries[0].sql
+    assert executor.query_ids == ["Q1"]
+    assert outcome.execution is not None
+    assert outcome.execution.rows == executor.series
+    assert len(outcome.analyst_outputs) == 1
+    assert isinstance(outcome.analyst_outputs[0].result, AnomalyResult)
+    assert outcome.analyst_outputs[0].result.actual == 20.0
+    assert outcome.budget.queries == 1
+    assert outcome.budget.wall_ms >= 0
+    assert [step.module for step in outcome.plan] == [
+        "router",
+        "query_series",
+        "anomaly",
+    ]
+    assert all(step.status == "completed" for step in outcome.plan)
+    assert outcome.latency_ms >= 0
+
+
+def test_budget_blocks_the_first_query_before_it_reaches_the_database():
+    executor = FakeExecutor()
+    outcome = _orchestrator(
+        executor,
+        budget=ExecutionBudget(max_queries=0),
+    ).run("Why did orders drop in August 2018?")
+
+    assert outcome.status == "error"
+    assert "budget" in outcome.reason.lower()
+    assert outcome.queries == ()
+    assert executor.sqls == []
+    assert outcome.budget.queries == 0
+
+
+def test_governed_lookup_is_routed_through_compiler_and_executed():
+    executor = FakeExecutor(scalar=500)
+    outcome = _orchestrator(executor).run("How many orders in August 2018?")
+
+    assert outcome.status == "ok"
+    assert outcome.route_labels == ("lookup",)
+    assert outcome.candidate is not None
+    assert outcome.candidate.origin == "compiler"
+    assert outcome.validation is not None
+    assert outcome.validation.approved is True
+    assert outcome.execution is not None
+    assert outcome.execution.rows == ((500,),)
+    assert len(outcome.queries) == 1
+    assert outcome.analyst_outputs == ()
+    assert [step.module for step in outcome.plan] == ["router", "lookup"]
+
+
+def test_low_confidence_question_stops_with_clarification_and_no_query():
+    executor = FakeExecutor()
+    outcome = _orchestrator(executor).run("How are sales doing?")
+
+    assert outcome.status == "clarification"
+    assert outcome.route_labels == ("clarify",)
+    assert outcome.clarification is not None
+    assert outcome.queries == ()
+    assert executor.sqls == []
+    assert outcome.plan[-1].status == "completed"
+
+
+def test_blocked_guard_short_circuits_orchestration():
+    executor = FakeExecutor()
+    guard = GuardResult(
+        passed=False,
+        reason="write_attempt",
+        matched_rule="delete_orders",
+    )
+    outcome = _orchestrator(executor).run(
+        "Why did orders drop in August 2018?",
+        guard_result=guard,
+    )
+
+    assert outcome.status == "blocked"
+    assert outcome.route_labels == ("blocked",)
+    assert outcome.queries == ()
+    assert executor.sqls == []
+
+
+def test_risk_route_returns_explicit_insufficient_evidence_not_fake_analysis():
+    executor = FakeExecutor()
+    outcome = _orchestrator(executor).run(
+        "Which customers are likely to churn?"
+    )
+
+    assert outcome.status == "insufficient_evidence"
+    assert outcome.route_labels == ("risk",)
+    assert "risk" in outcome.reason.lower()
+    assert outcome.queries == ()
+    assert executor.sqls == []
+
+
+def test_route_result_can_be_reused_to_avoid_routing_twice():
+    executor = FakeExecutor()
+    orchestrator = _orchestrator(executor)
+    route = orchestrator.router.route("Why did orders drop in August 2018?")
+
+    outcome = orchestrator.run(
+        "Why did orders drop in August 2018?",
+        route_result=route,
+    )
+
+    assert outcome.router == route
+    assert outcome.status == "ok"
+    assert len(executor.sqls) == 1

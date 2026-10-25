@@ -4,7 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Pydantic v2](https://img.shields.io/badge/contracts-pydantic--v2-green.svg)](https://docs.pydantic.dev/)
 [![SQLGlot](https://img.shields.io/badge/parser-sqlglot-orange.svg)](https://github.com/tobymao/sqlglot)
-[![Tests Passing](https://img.shields.io/badge/tests-170%20passing-brightgreen.svg)](backend/tests/)
+[![Tests Passing](https://img.shields.io/badge/tests-229%20passing-brightgreen.svg)](backend/tests/)
 [![Security Invariants](https://img.shields.io/badge/security-read--only%20enforced-red.svg)](spec/requirements.md)
 
 ---
@@ -39,9 +39,9 @@ Generic text-to-SQL wrappers (such as single-prompt LLMs or monolithic agent fra
                                              │         │
                      ┌───────────────────────┘         └────────────────────────┐
                      ▼                                                          ▼
-        [ GOVERNED KPI FAST-PATH ]                                 [ EXPLORATORY 4-STAGE NL2SQL ]
-        Deterministic Jinja/AST Compiler                           Perceptor -> Generator -> Reflector
-        (< 350ms, Zero LLM Calls)                                  (Fuzzy Linking + ICL + Bounded Repair)
+        [ GOVERNED KPI FAST-PATH ]                                 [ EXPLORATORY NL2SQL ]
+        Registry -> Jinja2 -> SQLGlot AST                          Perceptor -> Generator -> Bounded Repair
+        (Zero LLM; millisecond compile)                            (Fuzzy Linking + Deterministic Repair)
                      │                                                          │
                      └───────────────────────┬──────────────────────────────────┘
                                              │
@@ -58,11 +58,11 @@ Generic text-to-SQL wrappers (such as single-prompt LLMs or monolithic agent fra
                                   └──────────┬──────────┘
                                              │
                                   ┌──────────▼──────────┐
-                                  │ 6. Analytics Engine │ (STL Anomaly, PELT Change-Points, PVM Driver)
+                                  │ 6. Analytics Engine │ (Robust Anomaly, Change-Point, Driver Attribution)
                                   └──────────┬──────────┘
                                              │
                                   ┌──────────▼──────────┐
-                                  │ 7. Evidence Ledger  │ (EVID-1: Every number linked to raw SQL row)
+                                  │ 7. Evidence Ledger  │ (Claims linked to SQL rows + regex/causal fact checking)
                                   └──────────┬──────────┘
                                              │
                                   ┌──────────▼──────────┐
@@ -83,9 +83,14 @@ Generic text-to-SQL wrappers (such as single-prompt LLMs or monolithic agent fra
   * **Enterprise Mode:** Rejects `SELECT *`, enforces explicit column projections, bounds results with mandatory `LIMIT`, and gates query complexity.
   * **Benchmark Mode:** Relaxes enterprise row truncation to allow exact ground-truth execution matches (`EX >= 70%`) on benchmarks like **BIRD**.
 
-### ⚡ Deterministic Metric Compiler (< 350ms Fast-Path)
+### ⚡ Deterministic Metric Compiler (Zero-LLM Fast-Path)
 * Standard business metrics (e.g., GMV, Revenue, Order Count, AOV) bypass the LLM entirely.
-* Compiles pre-vetted join paths using a Jinja2/AST template compiler in sub-second latency with 100% mathematical reproducibility.
+* Resolves simple governed questions from a synonym registry, compiles pre-vetted join paths with strict Jinja2 templates, and validates every candidate through the SQLGlot AST. Compilation runs in single-digit milliseconds; warehouse execution time depends on the datasource.
+* Fail-closed on unknown metrics or dimensions: the compiler never invents tables, columns or join paths.
+
+### 🔎 Post-Execution Reconciler
+* Verifies expected grain, duplicate rows and join fan-out, mandatory-column nulls, numeric ranges, and governed registry totals with an explicit tolerance.
+* Surfaces every flag as a user-visible caveat; only flagged results can request a concise diagnosis from the local model.
 
 ### 🧠 Native 4-Stage NL2SQL Engine
 * **Schema Perceptor:** Deterministic exact/fuzzy value linking, resolving informal user terms (e.g., `"SP"` $\to$ `'customer_state = SP'`) before generation, with low-confidence and ambiguity clarification.
@@ -93,9 +98,10 @@ Generic text-to-SQL wrappers (such as single-prompt LLMs or monolithic agent fra
 * **Bounded Reflector (Self-Repair):** Automatically heals execution and syntax errors from error logs. Strictly capped at **2 attempts** with a **frozen schema allowlist** to prevent runaway loops or scope creep.
 
 ### 📊 Pure-Python Statistical Analytics (AN-1)
-* **Anomaly Detection:** Seasonal-Trend Decomposition (STL) and PELT change-point detection (`statsmodels`).
-* **Root Cause Analysis (RCA):** Price-Volume-Mix (PVM) variance decomposition (`numpy`) guaranteeing 100% mathematical reconciliation.
-* **Evidence Ledger:** Automatically cross-checks every number in the synthesized response against underlying query DataFrames. Unverified claims are stripped before reaching the user.
+* **Anomaly Detection:** NumPy-only robust trailing median/MAD baseline, with month-of-year seasonal medians when at least two years of history exist, plus a PELT-style two-segment persistence check.
+* **Driver Analysis:** Exact additive contribution by dimension with reconciliation error, approximate intervals and an explicit causal-boundary note.
+* **Orchestration:** Router, governed SQL, and analyst DAG with per-run query, token, and wall-time budgets; weak evidence returns `insufficient_evidence` rather than a fabricated conclusion.
+* **Evidence Ledger:** Every query row and analyst output becomes a numbered `C1...` claim; the fact checker strips narrative sentences containing unapproved numbers or unsupported causal wording.
 
 ---
 
@@ -109,14 +115,17 @@ Data_Scientist_Agent/
 │   │   ├── contracts/              # Frozen Pydantic v2 data models (spec/Interfaces.md)
 │   │   ├── gateway/                # Multi-database read-only connection & executor
 │   │   ├── guard.py                # Ingress security & injection filter
-│   │   ├── sql/                    # SQLGlot AST validator & dual-mode toggle
+│   │   ├── sql/                    # AST validator, metric compiler, generator, repairer, reconciler
 │   │   ├── schema_retriever/       # Fuzzy value linking & schema perception
-│   │   ├── catalog/                # Metric registry & semantic definitions
-│   │   ├── analysts/               # Statistical analytics (STL, PELT, PVM)
-│   │   ├── evidence/               # Evidence ledger & regex fact checker
+│   │   ├── catalog/                # Governed metric registry & intent/slot resolver
+│   │   ├── models/                 # Local Ollama OpenAI-compatible reasoning client
+│   │   ├── analysts/               # Robust anomaly, driver attribution, typed harness
+│   │   ├── evidence/               # Numbered claims and deterministic fact checking
 │   │   ├── router.py               # 3-Signal intent classifier & router
-│   │   └── app.py                  # FastAPI REST & SSE streaming server
-│   └── tests/                      # TDD test suites (170 unit & integration tests)
+│   │   ├── orchestrator.py         # Router-to-analyst DAG with execution budgets
+│   │   ├── service.py              # Background runs, SSE event store, AnswerEnvelope assembly
+│   │   └── app.py                  # FastAPI ask/run/event endpoints
+│   └── tests/                      # TDD test suites (229 unit & integration tests)
 │
 ├── frontend/                       # Web UI client & executive dashboard
 ├── spec/                           # Master engineering specifications & contracts
@@ -144,10 +153,10 @@ Data_Scientist_Agent/
 | :--- | :--- |
 | **Language** | Python 3.11+ |
 | **Type Contracts** | Pydantic v2 (Strict, frozen models) |
-| **SQL Engine & Safety** | SQLGlot (AST parsing), SQLAlchemy 2.0 (Read-only pooling) |
-| **Local LLM Inference** | Ollama (`qwen2.5-coder`, `llama3.1`) via standard OpenAI-compatible API |
-| **Analytics & Math** | NumPy, Pandas, Statsmodels (STL / PELT), SciPy |
-| **Web & Streaming** | FastAPI, Uvicorn, Server-Sent Events (`sse-starlette`) |
+| **SQL Engine & Safety** | Jinja2 (strict metric templates), SQLGlot (AST parsing), SQLAlchemy 2.0 (Read-only pooling) |
+| **Local LLM Inference** | Ollama (`deepseek-r1:7b`) via standard OpenAI-compatible API |
+| **Analytics & Math** | NumPy (robust baselines, intervals, change-point check) |
+| **Web & Streaming** | FastAPI, Uvicorn, Server-Sent Events (`StreamingResponse`, buffered replay via `Last-Event-ID`) |
 | **CLI & Testing** | Pytest, Rich, Tabulate |
 
 ---
@@ -156,7 +165,7 @@ Data_Scientist_Agent/
 
 ### Prerequisites
 * Python 3.11 or higher
-* [Ollama](https://ollama.ai) (optional, for local LLM text-to-SQL generation; recommends `ollama pull qwen2.5-coder`)
+* [Ollama](https://ollama.ai) (optional; governed questions run without it. For complex metric mapping and reconciliation diagnosis: `ollama pull deepseek-r1:7b`)
 
 ### Installation
 1. Clone the repository:
@@ -181,14 +190,34 @@ python -m pytest
 
 ```text
 platform win32 -- Python 3.14.7, pytest-9.1.1
-collected 170 items
+collected 229 items
 
-........................................................................ [ 42%]
-........................................................................ [ 85%]
-..........................                                               [100%]
+........................................................................ [ 33%]
+........................................................................ [ 67%]
+.....................................................................    [100%]
 
-170 passed in 2.47s
+229 passed in 9.95s
 ```
+
+### Running the API
+Start the FastAPI server from `backend/` (no Ollama required for governed questions):
+```bash
+uvicorn app:app --app-dir src --reload
+```
+
+Start a run, stream its progress, then fetch the final envelope:
+```bash
+curl -X POST http://127.0.0.1:8000/api/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"How many orders were there in August 2018?","session_id":"demo"}'
+
+curl -N http://127.0.0.1:8000/api/runs/<run_id>/events
+curl http://127.0.0.1:8000/api/runs/<run_id>
+```
+
+SSE events use monotonically increasing `seq` values and support reconnect with
+`Last-Event-ID`. The stream ends after `answer` or `error`; `GET /api/runs/{run_id}`
+returns the complete `AnswerEnvelope`.
 
 ---
 
@@ -208,9 +237,21 @@ collected 170 items
   - [x] Deterministic CTE generator with inferred joins and frozen allowlists
   - [x] Bounded self-repair with structured clarification
   - [ ] Hybrid keyword/dense retrieval and cross-encoder reranking
-- [ ] **Stage 4: Deterministic Metric Compiler Fast-Path & Reconciler (Sprint 4)**
-- [ ] **Stage 5: End-to-End Orchestrator DAG & Analyst Harness (Sprint 5)**
+- [x] **Stage 4: Deterministic Metric Compiler Fast-Path, Resolver & Reconciler (Sprint 4)**
+  - Governed metric registry and deterministic resolver for GMV, revenue, order count and AOV
+  - Strict Jinja2 compiler with catalog join paths, allowlists and SQLGlot validation
+  - Local Ollama `deepseek-r1:7b` client for complex metric mapping and flagged-result diagnosis
+  - Post-execution grain, duplicate/fan-out, null, range and registry-total reconciliation
+- [x] **Stage 5: End-to-End Orchestrator DAG & Analyst Harness (Sprint 5)**
+  - Three-signal router with deterministic rules, catalog classifier and optional local-model tie-break
+  - Orchestrator DAG with query, token and wall-time budgets; risk requests fail closed as `insufficient_evidence`
+  - Pure-Python anomaly and driver analysts behind a typed `AnalystHarness`
+  - CLI diagnostic flow with SQL/data, anomaly verdict and driver contribution tables
 - [ ] **Stage 6: FastAPI Production Server, SSE Streaming & Evaluation Harness (Sprint 6)**
+  - [x] Numbered evidence ledger for query rows and analyst outputs
+  - [x] Deterministic fact checker for unapproved numbers and causal wording
+  - [x] `POST /api/ask`, `GET /api/runs/{run_id}`, and SSE `GET /api/runs/{run_id}/events` with replay
+  - [ ] Evaluation harness and frontend integration
 
 ---
 

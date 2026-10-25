@@ -20,7 +20,12 @@ from typing import Any
 from contracts.models import (
     AnswerabilityResult,
     ExecutionResult,
+    FactCheckResult,
     GuardResult,
+    Ledger,
+    MetricResolution,
+    OrchestrationResult,
+    ReconciliationResult,
     RepairOutcome,
     SqlCandidate,
     ValidationResult,
@@ -155,17 +160,33 @@ class TraceLogger:
         answerability: AnswerabilityResult | None = None,
         candidate: SqlCandidate | None = None,
         repair: RepairOutcome | None = None,
+        metric_resolution: MetricResolution | None = None,
+        reconciliation: ReconciliationResult | None = None,
+        orchestration: OrchestrationResult | None = None,
+        ledger: Ledger | None = None,
+        fact_check: FactCheckResult | None = None,
+        run_id: str | None = None,
     ) -> TraceRecord:
-        run_id = uuid.uuid4().hex
+        run_id = run_id or uuid.uuid4().hex
         payload: dict[str, Any] = {
             "contract_version": "1.0.0",
             "run_id": run_id,
             "created_at": _utc_now(),
             "question": question,
             "guard": guard.model_dump(mode="json"),
+            "orchestration": (
+                orchestration.model_dump(mode="json")
+                if orchestration is not None
+                else None
+            ),
             "answerability": (
                 answerability.model_dump(mode="json")
                 if answerability is not None
+                else None
+            ),
+            "metric_resolution": (
+                metric_resolution.model_dump(mode="json")
+                if metric_resolution is not None
                 else None
             ),
             "candidate": (
@@ -174,11 +195,24 @@ class TraceLogger:
             "repair": (
                 repair.model_dump(mode="json") if repair is not None else None
             ),
+            "reconciliation": (
+                reconciliation.model_dump(mode="json")
+                if reconciliation is not None
+                else None
+            ),
             "validation": (
                 validation.model_dump(mode="json") if validation is not None else None
             ),
             "execution": (
                 execution.model_dump(mode="json") if execution is not None else None
+            ),
+            "ledger": (
+                ledger.model_dump(mode="json") if ledger is not None else None
+            ),
+            "fact_check": (
+                fact_check.model_dump(mode="json")
+                if fact_check is not None
+                else None
             ),
         }
 
