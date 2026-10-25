@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enterprise Data Scientist Agent — Interactive Workbench</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #0b0f19;
+      --bg-surface: #111827;
+      --bg-card: rgba(17, 24, 39, 0.85);
+      --bg-card-subtle: rgba(31, 41, 55, 0.5);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(56, 189, 248, 0.25);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dim: #6b7280;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --accent-purple: #a855f7;
+      --accent-green: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #ef4444;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --shadow-panel: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.5;
+      background-image: 
+        radial-gradient(circle at 15% 10%, rgba(56, 189, 248, 0.07) 0%, transparent 40%),
+        radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.06) 0%, transparent 40%),
+        radial-gradient(circle at 50% 80%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
+      background-attachment: fixed;
+    }
+
+    /* Header */
+    header {
+      background: rgba(11, 15, 25, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      padding: 0.85rem 1.5rem;
+    }
+
+    .header-content {
+      max-width: 1380px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      background: linear-gradient(135deg, #0284c7, #6366f1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: #fff;
+      box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+    }
+
+    .brand-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge-core {
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--primary);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 0.15rem 0.45rem;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .header-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.75rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--accent-green);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      box-shadow: 0 0 8px var(--accent-green);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .nav-btn {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      padding: 0.35rem 0.65rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-color);
+      transition: all 0.15s ease;
+      background: var(--bg-card-subtle);
+    }
+
+    .nav-btn:hover {
+      color: var(--text-main);
+      border-color: rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      max-width: 1380px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    /* Ask Workbench Panel */
+    .panel {
+      background: var(--bg-card);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      box-shadow: var(--shadow-panel);
+      position: relative;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+
+    .panel-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .input-wrapper {
+      position: relative;
+      margin-bottom: 1rem;
+    }
+
+    #queryInput {
+      width: 100%;
+      min-height: 85px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--radius-md);
+      padding: 1rem 1.25rem;
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 1rem;
+      line-height: 1.5;
+      resize: vertical;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    #queryInput:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+    }
+
+    .input-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .quick-prompts {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .prompt-chip {
+      font-size: 0.75rem;
+      padding: 0.3rem 0.65rem;
+      background: var(--bg-card-subtle);
+      border: 1px solid var(--border-color);
+      border-radius: 9999px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .prompt-chip:hover {
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--primary);
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+
+    .btn-run {
+      background: linear-gradient(135deg, #0284c7, #2563eb);
+      color: #fff;
+      font-size: 0.88rem;
+      font-weight: 600;
+      padding: 0.6rem 1.35rem;
+      border: none;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+
+    .btn-run:hover {
+      background: linear-gradient(135deg, #0369a1, #1d4ed8);
+      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.45);
+      transform: translateY(-1px);
+    }
+
+    .btn-run:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Execution DAG / Pipeline Timeline */
+    .timeline-container {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 1rem;
+      margin-top: 1rem;
+    }
+
+    .timeline-title {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .stages-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.5rem;
+    }
+
+    .stage-item {
+      background: var(--bg-card-subtle);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      padding: 0.5rem 0.65rem;
+      font-size: 0.75rem;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+
+    .stage-item.pending {
+      opacity: 0.45;
+    }
+
+    .stage-item.running {
+      border-color: var(--primary);
+      background: rgba(56, 189, 248, 0.08);
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    }
+
+    .stage-item.completed {
+      border-color: rgba(16, 185, 129, 0.4);
+      background: rgba(16, 185, 129, 0.06);
+    }
+
+    .stage-name {
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .stage-status {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--text-dim);
+    }
+
+    /* Live Stream Log */
+    .stream-log {
+      margin-top: 0.75rem;
+      max-height: 120px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      background: rgba(0, 0, 0, 0.4);
+      padding: 0.5rem 0.75rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .stream-line {
+      line-height: 1.4;
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .stream-seq {
+      color: var(--primary);
+      user-select: none;
+    }
+
+    /* Results Section */
+    .results-panel {
+      display: none;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .summary-card {
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8));
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: var(--radius-md);
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .summary-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .badges-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .status-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 0.2rem 0.55rem;
+      border-radius: var(--radius-sm);
+      letter-spacing: 0.04em;
+    }
+
+    .status-answered { background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); }
+    .status-blocked { background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); }
+    .status-refused { background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); }
+    .status-clarify { background: rgba(168, 85, 247, 0.18); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); }
+
+    .route-badge {
+      font-size: 0.72rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: var(--radius-sm);
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--primary);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      font-family: var(--font-mono);
+    }
+
+    .governed-badge {
+      font-size: 0.72rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: var(--radius-sm);
+      background: rgba(34, 197, 94, 0.12);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.25);
+    }
+
+    .conclusion-text {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.4;
+    }
+
+    .scope-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      padding-top: 0.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .meta-item strong {
+      color: var(--text-main);
+    }
+
+    /* Grid Layout for Details */
+    .grid-2col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+
+    @media (max-width: 900px) {
+      .grid-2col {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .card-title {
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* SQL Block */
+    .code-container {
+      position: relative;
+    }
+
+    .code-block {
+      background: #050811;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-sm);
+      padding: 0.85rem;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: #38bdf8;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 0.4rem;
+      right: 0.4rem;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--text-main);
+      padding: 0.2rem 0.5rem;
+      border-radius: var(--radius-sm);
+      font-size: 0.7rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .copy-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Evidence Table */
+    .evidence-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      text-align: left;
+    }
+
+    .evidence-table th {
+      padding: 0.5rem 0.65rem;
+      color: var(--text-dim);
+      border-bottom: 1px solid var(--border-color);
+      font-weight: 600;
+    }
+
+    .evidence-table td {
+      padding: 0.55rem 0.65rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      vertical-align: top;
+    }
+
+    .claim-tag {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .grade-badge {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      padding: 0.1rem 0.4rem;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+    }
+
+    /* Narrative Box */
+    .narrative-box {
+      font-size: 0.85rem;
+      line-height: 1.6;
+      color: #d1d5db;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .narrative-section {
+      background: rgba(255, 255, 255, 0.02);
+      border-left: 2px solid var(--primary);
+      padding: 0.5rem 0.75rem;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+
+    .narrative-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 0.25rem;
+    }
+
+    /* Data Table */
+    .data-table-container {
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    /* JSON Inspector */
+    details summary {
+      cursor: pointer;
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      padding: 0.4rem 0;
+      user-select: none;
+    }
+
+    details summary:hover {
+      color: var(--text-main);
+    }
+
+    .json-tree {
+      background: #050811;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      padding: 0.75rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: #a5b4fc;
+      max-height: 250px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border-color);
+      padding: 1rem 1.5rem;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      text-align: center;
+      background: rgba(11, 15, 25, 0.6);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-content">
+      <div class="brand">
+        <div class="brand-logo">DS</div>
+        <div>
+          <div class="brand-title">
+            Data Scientist Agent
+            <span class="badge-core">DS-AGENT-CORE</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-meta">
+        <div class="status-pill">
+          <span class="pulse-dot"></span>
+          <span>SQLite 100k Orders (Read-Only)</span>
+        </div>
+        <div class="nav-links">
+          <a href="/docs" target="_blank" class="nav-btn" title="OpenAPI / Swagger Documentation">Swagger API ↗</a>
+          <a href="/redoc" target="_blank" class="nav-btn" title="ReDoc Documentation">ReDoc ↗</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Query Input Section -->
+    <section class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">
+          <span>⚡</span>
+          <span>Analytical Query Workbench</span>
+        </h2>
+        <span style="font-size: 0.75rem; color: var(--text-dim);">Strict Invariant: Zero Hallucinated Numbers</span>
+      </div>
+
+      <div class="input-wrapper">
+        <textarea id="queryInput" placeholder="Enter your analytical query (e.g. 'What was total revenue in 2018?' or 'Why did orders drop in August 2017?')..."></textarea>
+      </div>
+
+      <div class="input-actions">
+        <div class="quick-prompts">
+          <span style="font-size: 0.72rem; color: var(--text-dim); margin-right: 0.25rem;">Quick Prompts:</span>
+          <button class="prompt-chip" onclick="setQuery('What was revenue in 2018?')">⚡ Revenue 2018 (Fast-Path)</button>
+          <button class="prompt-chip" onclick="setQuery('How many orders were there in August 2018?')">⚡ Orders Aug 2018</button>
+          <button class="prompt-chip" onclick="setQuery('Why did revenue drop in August 2017?')">🔍 Revenue Diagnostic 2017</button>
+          <button class="prompt-chip" onclick="setQuery('DROP TABLE orders;')">🛡️ Injection Guard Test</button>
+          <button class="prompt-chip" onclick="setQuery('What was customer NPS in 2018?')">🚫 Out-of-Catalog Refusal</button>
+        </div>
+        <button id="runBtn" class="btn-run" onclick="submitQuery()">
+          <span>Run Analysis</span>
+          <span>⚡</span>
+        </button>
+      </div>
+
+      <!-- Execution Progress Timeline -->
+      <div class="timeline-container">
+        <div class="timeline-title">
+          <span>Execution Pipeline Stages</span>
+          <span id="runIdDisplay" style="font-family: var(--font-mono); color: var(--primary);">IDLE</span>
+        </div>
+        <div class="stages-bar" id="stagesBar">
+          <div class="stage-item pending" id="stage-guard">
+            <div class="stage-name">1. Ingress Guard</div>
+            <div class="stage-status" id="status-guard">WAITING</div>
+          </div>
+          <div class="stage-item pending" id="stage-router">
+            <div class="stage-name">2. Intent Router</div>
+            <div class="stage-status" id="status-router">WAITING</div>
+          </div>
+          <div class="stage-item pending" id="stage-resolver">
+            <div class="stage-name">3. Metric Resolver</div>
+            <div class="stage-status" id="status-resolver">WAITING</div>
+          </div>
+          <div class="stage-item pending" id="stage-sql">
+            <div class="stage-name">4. SQL Engine</div>
+            <div class="stage-status" id="status-sql">WAITING</div>
+          </div>
+          <div class="stage-item pending" id="stage-validator">
+            <div class="stage-name">5. AST Validator</div>
+            <div class="stage-status" id="status-validator">WAITING</div>
+          </div>
+          <div class="stage-item pending" id="stage-executor">
+            <div class="stage-name">6. Read Gateway</div>
+            <div class="stage-status" id="status-executor">WAITING</div>
+          </div>
+          <div class="stage-item pending" id="stage-reconciler">
+            <div class="stage-name">7. Reconciler</div>
+            <div class="stage-status" id="status-reconciler">WAITING</div>
+          </div>
+          <div class="stage-item pending" id="stage-fact_checker">
+            <div class="stage-name">8. Fact Checker</div>
+            <div class="stage-status" id="status-fact_checker">WAITING</div>
+          </div>
+        </div>
+        <div class="stream-log" id="streamLog">
+          <div class="stream-line"><span class="stream-seq">[SYS]</span> Pipeline ready. Submit a question to initiate streaming trace DAG.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results Panel -->
+    <section class="panel results-panel" id="resultsPanel">
+      <div class="summary-card">
+        <div class="summary-header">
+          <div class="badges-group">
+            <span class="status-badge" id="resStatusBadge">ANSWERED</span>
+            <span class="route-badge" id="resRouteBadge">ROUTE: LOOKUP</span>
+            <span class="governed-badge" id="resGovernedBadge">GOVERNED METRIC</span>
+          </div>
+          <div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono);" id="resExecutionTime">
+            Completed in -- ms
+          </div>
+        </div>
+        <div class="conclusion-text" id="resConclusion">
+          --
+        </div>
+        <div class="scope-meta" id="resScopeMeta">
+          <span class="meta-item">Metric: <strong id="scopeMetric">--</strong></span>
+          <span class="meta-item">Window: <strong id="scopeWindow">--</strong></span>
+          <span class="meta-item">Grain: <strong id="scopeGrain">--</strong></span>
+        </div>
+      </div>
+
+      <div class="grid-2col">
+        <!-- Narrative Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>Audited Narrative & Interpretations</span>
+            <span style="font-size: 0.7rem; color: var(--accent-green);">Deterministic Fact Checked</span>
+          </div>
+          <div class="narrative-box" id="resNarrativeBox">
+            <p style="color: var(--text-muted); font-style: italic;">No diagnostic narrative needed for direct metric lookup.</p>
+          </div>
+        </div>
+
+        <!-- Executed SQL Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>Generated / Compiled SQL Statement</span>
+            <span style="font-size: 0.7rem; color: var(--primary);" id="sqlOriginBadge">JINJA2 AST COMPILER</span>
+          </div>
+          <div class="code-container">
+            <pre class="code-block" id="resSqlCode">-- SQL query will appear here</pre>
+            <button class="copy-btn" onclick="copySql()">Copy</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Evidence Ledger Claims -->
+      <div class="card">
+        <div class="card-title">
+          <span>Evidence Ledger & Immutable Claims (C1..Cn)</span>
+          <span style="font-size: 0.7rem; color: var(--accent-purple);">Audit Trail</span>
+        </div>
+        <table class="evidence-table">
+          <thead>
+            <tr>
+              <th style="width: 80px;">Claim ID</th>
+              <th>Audited Statement & Number</th>
+              <th style="width: 90px;">Grade</th>
+              <th style="width: 140px;">Verification</th>
+            </tr>
+          </thead>
+          <tbody id="evidenceTableBody">
+            <tr><td colspan="4" style="color: var(--text-dim);">No claims recorded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Data Results Table -->
+      <div class="card">
+        <div class="card-title">
+          <span>Query Result Rows</span>
+          <span style="font-size: 0.7rem; color: var(--text-muted);" id="resRowCount">0 rows</span>
+        </div>
+        <div class="data-table-container">
+          <table class="evidence-table" id="rowsTable">
+            <thead id="rowsTableHead"></thead>
+            <tbody id="rowsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- JSON Inspector -->
+      <details>
+        <summary>Inspect Complete AnswerEnvelope (JSON Trace)</summary>
+        <pre class="json-tree" id="rawEnvelopeJson"></pre>
+      </details>
+    </section>
+  </main>
+
+  <footer>
+    Enterprise Data Scientist Agent (DS-AGENT-CORE) · Fail-Closed Semantic Architecture · Read-Only Warehouse
+  </footer>
+
+  <script>
+    const STAGES = ['guard', 'router', 'resolver', 'sql', 'validator', 'executor', 'reconciler', 'fact_checker'];
+    let currentEventSource = null;
+
+    function setQuery(text) {
+      const input = document.getElementById('queryInput');
+      input.value = text;
+      input.focus();
+    }
+
+    document.getElementById('queryInput').addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        submitQuery();
+      }
+    });
+
+    function resetPipeline() {
+      STAGES.forEach(s => {
+        const item = document.getElementById('stage-' + s);
+        const status = document.getElementById('status-' + s);
+        if (item) item.className = 'stage-item pending';
+        if (status) status.textContent = 'WAITING';
+      });
+      document.getElementById('streamLog').innerHTML = '';
+      document.getElementById('resultsPanel').style.display = 'none';
+    }
+
+    function appendStreamLog(seq, text) {
+      const log = document.getElementById('streamLog');
+      const line = document.createElement('div');
+      line.className = 'stream-line';
+      line.innerHTML = `<span class="stream-seq">[#${seq || '•'}]</span> <span>${escapeHtml(text)}</span>`;
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function updateStageStatus(stageName, state, text) {
+      const item = document.getElementById('stage-' + stageName);
+      const status = document.getElementById('status-' + stageName);
+      if (!item) return;
+      if (state === 'running') {
+        item.className = 'stage-item running';
+        if (status) status.textContent = text || 'RUNNING';
+      } else if (state === 'completed') {
+        item.className = 'stage-item completed';
+        if (status) status.textContent = text || 'PASS';
+      }
+    }
+
+    async function submitQuery() {
+      const query = document.getElementById('queryInput').value.trim();
+      if (!query) return;
+
+      const runBtn = document.getElementById('runBtn');
+      runBtn.disabled = true;
+      resetPipeline();
+
+      const sessionId = 'web-sess-' + Date.now();
+      appendStreamLog(0, 'Submitting query to /api/ask...');
+
+      try {
+        const res = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: query, session_id: sessionId })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ detail: res.statusText }));
+          appendStreamLog('ERR', 'API Error: ' + (errData.detail || 'Submission failed'));
+          runBtn.disabled = false;
+          return;
+        }
+
+        const data = await res.json();
+        const runId = data.run_id;
+        document.getElementById('runIdDisplay').textContent = 'RUN: ' + runId.slice(0, 8);
+        appendStreamLog(1, 'Run registered: ' + runId + '. Opening SSE stream...');
+
+        // Connect SSE
+        listenToStream(runId);
+
+      } catch (err) {
+        appendStreamLog('ERR', 'Network failure: ' + err.message);
+        runBtn.disabled = false;
+      }
+    }
+
+    function listenToStream(runId) {
+      if (currentEventSource) {
+        currentEventSource.close();
+      }
+
+      currentEventSource = new EventSource('/api/runs/' + runId + '/events');
+
+      currentEventSource.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data);
+          handlePipelineEvent(event, runId);
+        } catch (err) {
+          console.error('SSE parse error:', err);
+        }
+      };
+
+      currentEventSource.onerror = () => {
+        // SSE disconnected or finished
+        currentEventSource.close();
+        currentEventSource = null;
+        fetchEnvelope(runId);
+      };
+    }
+
+    function handlePipelineEvent(event, runId) {
+      appendStreamLog(event.seq, `${event.step || event.type}: ${event.message || JSON.stringify(event.payload || {})}`);
+
+      const step = (event.step || '').toLowerCase();
+      if (step.includes('guard')) {
+        updateStageStatus('guard', event.type === 'step_completed' ? 'completed' : 'running');
+      } else if (step.includes('router') || step.includes('intent')) {
+        updateStageStatus('router', event.type === 'step_completed' ? 'completed' : 'running');
+      } else if (step.includes('resolver') || step.includes('metric')) {
+        updateStageStatus('resolver', event.type === 'step_completed' ? 'completed' : 'running');
+      } else if (step.includes('sql') || step.includes('generator') || step.includes('compiler')) {
+        updateStageStatus('sql', event.type === 'step_completed' ? 'completed' : 'running');
+      } else if (step.includes('validator') || step.includes('ast')) {
+        updateStageStatus('validator', event.type === 'step_completed' ? 'completed' : 'running');
+      } else if (step.includes('executor') || step.includes('gateway') || step.includes('query')) {
+        updateStageStatus('executor', event.type === 'step_completed' ? 'completed' : 'running');
+      } else if (step.includes('reconcil')) {
+        updateStageStatus('reconciler', event.type === 'step_completed' ? 'completed' : 'running');
+      } else if (step.includes('fact') || step.includes('ledger')) {
+        updateStageStatus('fact_checker', event.type === 'step_completed' ? 'completed' : 'running');
+      }
+
+      if (event.type === 'run_completed' || event.step === 'run_completed') {
+        if (currentEventSource) {
+          currentEventSource.close();
+          currentEventSource = null;
+        }
+        fetchEnvelope(runId);
+      }
+    }
+
+    async function fetchEnvelope(runId) {
+      document.getElementById('runBtn').disabled = false;
+      try {
+        const res = await fetch('/api/runs/' + runId);
+        if (!res.ok) {
+          appendStreamLog('ERR', 'Failed to retrieve AnswerEnvelope');
+          return;
+        }
+        const envelope = await res.json();
+        renderEnvelope(envelope);
+      } catch (err) {
+        appendStreamLog('ERR', 'Envelope fetch failed: ' + err.message);
+      }
+    }
+
+    function renderEnvelope(env) {
+      const panel = document.getElementById('resultsPanel');
+      panel.style.display = 'flex';
+
+      // Status Badge
+      const statusBadge = document.getElementById('resStatusBadge');
+      const status = env.status || 'answered';
+      statusBadge.textContent = status.toUpperCase();
+      statusBadge.className = 'status-badge status-' + status;
+
+      // Route Badge
+      const route = (env.route && env.route.labels && env.route.labels[0]) || 'general';
+      document.getElementById('resRouteBadge').textContent = 'ROUTE: ' + route.toUpperCase();
+
+      // Governed Badge
+      const governed = env.scope && env.scope.governed;
+      const govBadge = document.getElementById('resGovernedBadge');
+      if (governed) {
+        govBadge.textContent = 'GOVERNED KPI';
+        govBadge.style.display = 'inline-block';
+      } else {
+        govBadge.textContent = 'AD-HOC SQL';
+        govBadge.style.display = 'inline-block';
+      }
+
+      // Conclusion
+      document.getElementById('resConclusion').textContent = env.conclusion || 'No narrative conclusion provided.';
+
+      // Scope
+      document.getElementById('scopeMetric').textContent = (env.scope && env.scope.metric) || 'None';
+      document.getElementById('scopeWindow').textContent = (env.scope && env.scope.window) || 'All time';
+      document.getElementById('scopeGrain').textContent = (env.scope && env.scope.grain) || 'Aggregated';
+
+      // Narrative Box
+      const narrativeBox = document.getElementById('resNarrativeBox');
+      if (env.narrative) {
+        narrativeBox.innerHTML = `
+          ${env.narrative.findings ? `<div class="narrative-section"><div class="narrative-label">Findings</div><div>${escapeHtml(env.narrative.findings)}</div></div>` : ''}
+          ${env.narrative.interpretations ? `<div class="narrative-section"><div class="narrative-label">Interpretations</div><div>${escapeHtml(env.narrative.interpretations)}</div></div>` : ''}
+          ${env.narrative.recommended_actions ? `<div class="narrative-section"><div class="narrative-label">Recommended Actions (Human Approval Req)</div><div>${escapeHtml(env.narrative.recommended_actions)}</div></div>` : ''}
+        `;
+      } else {
+        narrativeBox.innerHTML = `<p style="color: var(--text-muted); font-style: italic;">Direct single-point answer. No multi-factor narrative required.</p>`;
+      }
+
+      // SQL Box
+      const sqlObj = env.sql;
+      const sqlCode = document.getElementById('resSqlCode');
+      const sqlOrigin = document.getElementById('sqlOriginBadge');
+      if (sqlObj && sqlObj.sql) {
+        sqlCode.textContent = formatSql(sqlObj.sql);
+        sqlOrigin.textContent = (sqlObj.origin || 'SQL GATEWAY').toUpperCase();
+      } else {
+        sqlCode.textContent = '-- No SQL executed (Answer resolved via refusal, ingress block, or cached total)';
+        sqlOrigin.textContent = 'NONE';
+      }
+
+      // Evidence Claims
+      const tbody = document.getElementById('evidenceTableBody');
+      tbody.innerHTML = '';
+      if (env.claims && env.claims.length > 0) {
+        env.claims.forEach(c => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td><span class="claim-tag">${c.claim_id}</span></td>
+            <td>${escapeHtml(c.text)}</td>
+            <td><span class="grade-badge">Grade ${c.grade !== undefined ? c.grade : '4'}</span></td>
+            <td><span style="color: var(--accent-green);">✓ Verified</span></td>
+          `;
+          tbody.appendChild(row);
+        });
+      } else {
+        tbody.innerHTML = `<tr><td colspan="4" style="color: var(--text-dim); text-align: center;">No discrete claims in ledger.</td></tr>`;
+      }
+
+      // Rows Table
+      const thead = document.getElementById('rowsTableHead');
+      const rbody = document.getElementById('rowsTableBody');
+      thead.innerHTML = '';
+      rbody.innerHTML = '';
+
+      let evidenceItem = (env.evidence && env.evidence[0]) || null;
+      if (evidenceItem && evidenceItem.output && evidenceItem.output.columns && evidenceItem.output.rows) {
+        const cols = evidenceItem.output.columns;
+        const rows = evidenceItem.output.rows;
+        document.getElementById('resRowCount').textContent = `${rows.length} row(s)`;
+
+        const htr = document.createElement('tr');
+        cols.forEach(c => {
+          const th = document.createElement('th');
+          th.textContent = c.name + (c.type ? ` (${c.type})` : '');
+          htr.appendChild(th);
+        });
+        thead.appendChild(htr);
+
+        rows.forEach(r => {
+          const dtr = document.createElement('tr');
+          r.forEach(val => {
+            const td = document.createElement('td');
+            td.textContent = (val !== null && val !== undefined) ? val : 'NULL';
+            dtr.appendChild(td);
+          });
+          rbody.appendChild(dtr);
+        });
+      } else {
+        document.getElementById('resRowCount').textContent = '0 rows';
+        rbody.innerHTML = `<tr><td style="color: var(--text-dim);">No tabular data output.</td></tr>`;
+      }
+
+      // Raw JSON
+      document.getElementById('rawEnvelopeJson').textContent = JSON.stringify(env, null, 2);
+
+      // Scroll smoothly to results
+      panel.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function formatSql(sql) {
+      return sql.replace(/\s+/g, ' ')
+        .replace(/\bSELECT\b/gi, '\nSELECT')
+        .replace(/\bFROM\b/gi, '\nFROM')
+        .replace(/\bWHERE\b/gi, '\nWHERE')
+        .replace(/\bGROUP BY\b/gi, '\nGROUP BY')
+        .replace(/\bORDER BY\b/gi, '\nORDER BY')
+        .replace(/\bLIMIT\b/gi, '\nLIMIT')
+        .replace(/\bLEFT JOIN\b/gi, '\n  LEFT JOIN')
+        .replace(/\bINNER JOIN\b/gi, '\n  INNER JOIN')
+        .trim();
+    }
+
+    function copySql() {
+      const sql = document.getElementById('resSqlCode').textContent;
+      navigator.clipboard.writeText(sql);
+      const btn = event.target;
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 1500);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>

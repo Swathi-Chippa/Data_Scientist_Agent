@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import AsyncIterator, Iterator
 
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from contracts.models import AnswerEnvelope, AskRequest, AskResponse
 from service import (
@@ -22,6 +22,9 @@ _DATABASE_PATH = (
     Path(__file__).resolve().parents[2] / "brazil_ecommerce.sqlite"
 ).resolve()
 _TRACE_DIR = Path(__file__).resolve().parents[1] / "traces"
+_FRONTEND_INDEX = (
+    Path(__file__).resolve().parents[2] / "frontend" / "index.html"
+).resolve()
 
 
 def create_app(
@@ -58,6 +61,21 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.run_service = service
+
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> HTMLResponse:
+        if _FRONTEND_INDEX.exists():
+            return HTMLResponse(content=_FRONTEND_INDEX.read_text(encoding="utf-8"))
+        return HTMLResponse(
+            content="""<!DOCTYPE html>
+<html>
+<head><title>DS Agent</title></head>
+<body style="font-family:sans-serif;background:#0b0f19;color:#e5e7eb;padding:40px;">
+  <h1>Enterprise Data Scientist Agent</h1>
+  <p>Interactive API docs: <a href="/docs" style="color:#38bdf8;">/docs</a></p>
+</body>
+</html>"""
+        )
 
     @app.post("/api/ask", response_model=AskResponse)
     def ask(payload: AskRequest) -> AskResponse:
