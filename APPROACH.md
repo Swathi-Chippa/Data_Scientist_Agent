@@ -115,47 +115,81 @@ The architecture enforces a strict boundary: **Probabilistic models propose and 
 └──────────────────────────────────────────────┴──────────────────────────────────────────────┘
 ```
 
-| Step | Component | Input Contract | Output Contract | Executor | Failure / Fallback Behavior |
+| # | Component | Receives | Returns | Engine / Model vs. Code | On Failure / Edge Case |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1. Guard** | `Guard` | Raw prompt string | Sanitized query string | Code (Regex) | Blocks write tokens and injection attempts immediately. |
-| **2. Router** | `Router` | Sanitized query | `RouteType`, slots, confidence | 3-Signal Code/SLM | Low confidence ($< 0.70$) yields structured clarification. |
-| **3. Catalog Check** | `AnswerabilityChecker` | Extracted entities | `AnswerabilityResult` | Code (Set logic) | Refuses out-of-catalog entities (`ABS-1`), naming missing items. |
-| **4. Fast-Path** | `SQLCompiler` | `MetricDefinition`, slots | `CompiledMetric` AST | Code (Jinja2) | Bypasses LLM entirely; raises `MetricCompilationError`. |
-| **5. NL2SQL** | `SQLGenerator` | Question, linked literals | `SqlCandidate` (CTEs) | Code / LLM | CTE skeleton divide-and-conquer strategy. |
-| **6. Validate** | `SQLValidator` | Candidate SQL, mode | `ValidationResult` | Code (SQLGlot) | Enterprise Mode enforces schema allowlist and read-only AST. |
-| **7. Repair** | `SelfRepairer` | Error message, SQL | `RepairOutcome` | LLM + Code | Strictly capped at **2 attempts**; schema allowlist frozen (`SQL-11`). |
-| **8. Gateway** | `QueryExecutor` | Validated SQL AST | `ExecutionResult` (rows) | Read-Only Pool | Enforces 10s query timeout and 50-row cap (`SQL-9`). |
-| **9. Reconcile** | `Reconciler` | Rows, expected grain | `ReconciliationResult` | Code (Pandas) | Flags grain duplicates, 1:N fan-out, and registry mismatch. |
-| **10. Analytics**| `AnalystHarness` | Reconciled data, params | `AnalystOutput` (typed) | Code (NumPy) | Checks sample size ($N \ge 30$); fails to `insufficient_evidence`. |
-| **11. Trust** | `FactChecker` | Draft narrative, ledger | `AnswerEnvelope` | Code (Regex) | Purges sentences with unverified figures (`SAFE-3`). |
+| **1** | **Guard** | Raw user text | Sanitized query string | Code (Regex & Token patterns) | Block with reason (`SAFE-2`, `SAFE-4`). |
+| **2** | **Router & Extractor** | Sanitized query | `RouteType`, slots, confidence | 3-Signal (Classifier + Rules + SLM proposal) | Confidence $< 0.70 \to$ structured clarification. |
+| **3** | **Planner** | Route + slots | Ordered plan of Analysts | Model drafts; Code validates against Registry | Plan invalid $\to$ single-module fallback / clarify. |
+| **4** | **Metric Resolver** | Entity slots | Governed `MetricDefinition` or None | Code (Synonyms & Registry match) | Unknown $\to$ label `"ungoverned metric"` badge (`MET-4`). |
+| **5** | **Answerability Checker** | Requested entities | `AnswerabilityResult` | Code (Schema Catalog Containment) | Refusal naming missing attribute (`ABS-1`). |
+| **6** | **Schema Retriever** | Question + definitions | Pruned tables/columns, join path, literals | Vector/BM25 Code + Trigram Linker | Low confidence $\to$ clarify; never guess schema. |
+| **7a**| **SQL Compiler** | Governed metric definition | Validated SQL AST (No LLM) | Code (Deterministic Jinja2 Templates) | Sub-10ms; zero model call (`MET-3`). |
+| **7b**| **SQL Generator** | Filtered schema, exemplars | Candidate SQL (CTE skeletons) | Model (Skeleton-of-Thought) | Dispatched to Validator (`SQL-16`). |
+| **8** | **AST Validator** | Candidate SQL, allowlist | `ValidationResult` (approved/rejected) | Code (SQLGlot AST Parser) | Dual-Mode: Enterprise allowlist vs Benchmark (`SQL-17`). |
+| **8b**| **Self-Repair Reflector**| Error + failed SQL + allowlist | Refined candidate SQL | Model + Code (Error trace prompt) | Capped at **2 attempts**; allowlist frozen (`SQL-11`). |
+| **9** | **Executor** | Approved SQL statement | Rows, scanned count, duration | Code (Read-Only Pool, SQLite/MySQL/PG) | 10s timeout kill (`SQL-9`); row cap enforcement. |
+| **10**| **Reconciler** | Rows + metric definition | `ReconciliationResult` (flags/pass) | Code (Pandas / Vectorized) | Checks grain uniqueness, fan-out, nulls (`SQL-10`, `MET-5`). |
+| **11**| **Statistical Analysts** | Reconciled data + params | Typed `AnalystOutput` (numbers, intervals) | Statistical Code (STL, PELT, PVM, DiD) | $N < 30 \to$ return `"insufficient_evidence"`. |
+| **11b**|**Strategic Advisor** | Analyst outputs + Action Library| Ranked 2–3 options with trade-offs | Code (Multi-Criteria Decision Analysis) | Recommends low-cost info gathering if evidence low. |
+| **12**| **Evidence Ledger** | Analyst & Query outputs | Numbered claims (`C1..Cn`) with grades 0–4 | Code (Deterministic Store) | Unaudited claim dropped or marked hypothesis (`EVID-2`). |
+| **13**| **Narrative Synthesizer**| Ledger claims only | Tripartite narrative (Findings/Interpret/Action)| Model (Strictly grounded in ledger) | Dispatched to Fact Checker (`EVID-6`). |
+| **14**| **Fact Checker** | Narrative + Ledger claims | Final audited `AnswerEnvelope` | Code (Regex claim extractor & numeric audit) | Purges sentences containing unverified numbers (`SAFE-3`). |
 
 ### 2. Workflow Decision & Failure Paths
 
+> **Legend:** 🟦 **Blue:** Model writes · 🟨 **Amber:** Model assists, code decides · ⬜ **Grey:** Plain deterministic code · 🟩 **Green:** Person approves · 🟥 **Red:** Refusal / Hard stop.
+
 ```mermaid
-flowchart LR
-    IN["User Question"] --> C1{"In Catalog?"}
-    C1 -->|"No (ABS-1)"| REFUSE["Refusal Screen:<br/>Name missing entity &<br/>suggest closest query"]
-    C1 -->|"Yes"| C2{"Governed Metric?"}
+flowchart TD
+    Q(["User Question"]):::model --> G["1. Guard: Read-only & injection check"]:::code
+    G -->|"Write attempt or injection"| BLK(["Blocked with reason"]):::stop
+    G --> R["2. Router & Extractor: Classifier + rules decide, model fills slots"]:::mixed
+    R -->|"Low confidence or ambiguous"| CL(["Clarifying question to user"]):::human
+    R --> PL["3. Planner: Ordered analyst plan, validated against Registry"]:::mixed
+    PL --> S["4. Metric Resolver: Definitions, grain, dates"]:::code
+    S --> B{"5. Answerability Checker: In catalog?"}:::code
+    B -->|"No"| REF(["Refusal (ABS-1): States missing attribute"]):::stop
+    B -->|"Yes"| RET["6. Schema Retriever: Join graph & value linker"]:::mixed
+    RET -->|"Low retrieval confidence"| CL
+    RET --> P{"Governed metric fully covered?"}:::code
+    P -->|"Yes"| COMP["7a. SQL Compiler (Zero-LLM Fast Path)"]:::code
+    P -->|"No"| GEN["7b. SQL Generator: CTE skeletons on allowlist"]:::model
+    COMP --> V
+    GEN --> V{"8. AST Validator: Allowlist, single SELECT, limits"}:::code
+    V -->|"AST / syntax error"| REP["8b. Self-Repairer: Error prompt, max 2 attempts"]:::model
+    REP --> V
+    REP -->|"Cap reached"| CL
+    V -->|"Approved"| X[("9. Executor: Read-only gateway, 10s budget")]:::code
+    X -->|"Runtime error"| REP
+    X --> QC["10. Reconciler: Invariant checks & registry total check"]:::code
+    QC -->|"Mismatch persists"| CAV["Attach visible caveat"]:::code
+    QC --> M{"11. Analysts, following plan"}:::code
+    CAV --> M
+    M -->|"Lookup"| LK["Lookup result"]:::code
+    M -->|"Anomaly"| AN["Anomaly Analyst (STL + PELT + FDR)"]:::code
+    M -->|"Root Cause"| RC["Driver Analyst (PVM + DiD + Bootstrap)"]:::code
+    M -->|"Risk"| CH["Risk Analyst (Time-split Churn)"]:::code
+    AN --> RC
+    RC --> RECO["11b. Strategic Advisor"]:::code
+    CH --> RECO
+    LK --> LED
+    AN --> LED
+    RC --> LED
+    RECO --> LED["12. Evidence Ledger: Claims C1..Cn & Grades 0-4"]:::code
+    LED -->|"Unsupported claim"| FIX["Remove claim / label hypothesis"]:::code
+    FIX --> SYN
+    LED --> SYN["13. Synthesizer: Writes from ledger only"]:::model
+    SYN --> FC{"14. Fact Checker: Every number in ledger?"}:::code
+    FC -->|"Fail"| FIX
+    FC -->|"Pass"| OUT(["Audited Answer: Route, SQL, Numbers, Caveats, Actions"]):::code
+    OUT --> APPR(["Person approves or rejects operational action"]):::human
+    QC -->|"Validated candidate"| CUR(["Person reviews candidate for Golden Store"]):::human
 
-    C2 -->|"Full Match"| COMP["Deterministic SQL Compiler<br/>(Sub-10ms; No Model)"]
-    C2 -->|"Ad-Hoc / Partial"| GEN["4-Stage SQL Generator<br/>(Skeleton-of-Thought)"]
-
-    COMP --> VAL{"AST Validator"}
-    GEN --> VAL
-
-    VAL -->|"Pass"| EXEC[("Read-Only DB Execution")]
-    VAL -->|"Fail"| REP{"Self-Repair<br/>Attempt <= 2?"}
-    REP -->|"Yes"| GEN
-    REP -->|"No (SQL-11)"| CLAR["Clarification Prompt<br/>(Halt & Ask User)"]
-
-    EXEC --> RECON{"Result Reconciler"}
-    RECON -->|"Registry Mismatch"| RETRY{"Retry Used?"}
-    RETRY -->|"No"| EXEC
-    RETRY -->|"Yes"| CAVEAT["Append Visible Caveat"]
-
-    RECON --> ANALYTICS["Typed Statistical Analysts"]
-    ANALYTICS --> FACT["Deterministic Fact Checker"]
-    FACT --> OUT["Audited AnswerEnvelope"]
+    classDef model fill:#dbeafe,stroke:#1d4ed8,stroke-width:1.5px,color:#1e3a8a;
+    classDef mixed fill:#fef3c7,stroke:#b45309,stroke-width:1.5px,color:#78350f;
+    classDef code fill:#e5e7eb,stroke:#374151,stroke-width:1.5px,color:#111827;
+    classDef human fill:#dcfce7,stroke:#15803d,stroke-width:1.5px,color:#14532d;
+    classDef stop fill:#fee2e2,stroke:#b91c1c,stroke-width:1.5px,color:#7f1d1d;
 ```
 
 ### 3. Agent Pattern: Deterministic Orchestrated DAG vs. Autonomous ReAct
@@ -212,8 +246,25 @@ To prevent benchmark contamination and lookahead leakage:
 | **Fact Checker Faithfulness** | $\ge 95.0\%$ | `SAFE-3`, `EVID-4` | Percentage of sentences verified by ledger; zero unsupported numeric claims. |
 | **Governed Latency** | $< 350\text{ms}$ (Cache) / P50 $\le 2.0\text{s}$ | `OPS-6` | Real-time interactive performance for business stakeholders. |
 
-### 2. Ablation Ladder & Comparisons
-The system is quantitatively evaluated against an explicit progression:
+### 2. Test Suite Allocation & Target Case Counts (`D2`)
+
+| Category | Target Cases | Verification Objective |
+| :--- | :---: | :--- |
+| **Governed KPI Lookups** | ~30 | Fast-path Jinja2 compiler determinism and latency SLA (`MET-3`). |
+| **Multi-Table Joins & Messy Values**| ~30 | Schema perception, Steiner join paths, trigram value linking. |
+| **Anomaly Diagnostic Cases** | ~20 | Detection recall on anomalies vs. ~8 negative controls (normal noise). |
+| **Root Cause & Confounder Cases** | ~15 | PVM reconciliation, bootstrap CIs, DiD, confounder rejection. |
+| **Risk Prediction Cases** | ~10 | Chronological time-split churn PR-AUC vs. RFM baseline. |
+| **Strategic Recommendations** | ~10 | Action Library ranking rubric and sensitivity analysis. |
+| **Out-of-Catalog Refusals** | ~25 | Refusal precision/recall naming missing attributes (`ABS-1`, `ABS-2`). |
+| **Near-Miss Edge Cases** | ~10 | Ensuring answerable variants are not over-refused (`ABS-3`). |
+| **Ambiguous / Handoff Cases** | ~10 | Clarification quality (`what_understood` vs `what_needed`). |
+| **Causal-Overclaim ("Did X cause Y?")**| ~10 | Enforcing Grade 0–4 language limits and causal disclaimer (`DRV-9`). |
+| **Adversarial & Injection Attacks** | ~10 | Ingress guard write-blocking and sanitization (`SAFE-2`, `SAFE-4`). |
+| **Scale Ladder Variants** | Across 50/200/500 | Measuring degradation curve across increasing catalog distraction. |
+
+### 3. Ablation Ladder & Comparisons (`D3`)
+The system is quantitatively evaluated against an explicit progression on identical questions:
 1. **Baseline A:** Naive Text-to-SQL (single LLM prompt with raw schema text).
 2. **Baseline B:** Native 4-Stage NL2SQL Engine (`src/sql/`) without statistical analysis.
 3. **Module Baselines (`ANA-2`):**
@@ -222,9 +273,9 @@ The system is quantitatively evaluated against an explicit progression:
    * *Risk Baseline:* Heuristic RFM segmentation (vs. agent's calibrated time-split model).
 4. **System C:** Full Data Scientist Agent incorporating Evidence Ledger and Fact Checker.
 
-### 3. Formal Pass Rule (The Six Criteria) (`EVAL-4`)
+### 4. Formal Pass Rule (The Six Criteria) (`EVAL-4`)
 A release is certified if and only if **all six criteria pass simultaneously** (averaging is prohibited):
-1. Zero hard safety violations.
+1. Zero hard safety violations (`SAFE-1` to `SAFE-8`).
 2. BIRD Execution Accuracy $\ge 70.0\%$, outperforming Baseline A.
 3. Every analytical module beats its respective baseline on planted ground truth.
 4. Refusal precision and recall $\ge 90.0\%$.
