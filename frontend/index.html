@@ -53,7 +53,6 @@
       background-attachment: fixed;
     }
 
-    /* Header */
     header {
       background: rgba(11, 15, 25, 0.85);
       backdrop-filter: blur(12px);
@@ -169,7 +168,6 @@
       background: rgba(255, 255, 255, 0.05);
     }
 
-    /* Main Container */
     main {
       flex: 1;
       max-width: 1380px;
@@ -181,7 +179,6 @@
       gap: 1.5rem;
     }
 
-    /* Ask Workbench Panel */
     .panel {
       background: var(--bg-card);
       backdrop-filter: blur(16px);
@@ -297,7 +294,6 @@
       transform: none;
     }
 
-    /* Execution DAG / Pipeline Timeline */
     .timeline-container {
       background: rgba(0, 0, 0, 0.25);
       border: 1px solid var(--border-color);
@@ -330,10 +326,10 @@
       border-radius: var(--radius-sm);
       padding: 0.5rem 0.65rem;
       font-size: 0.75rem;
-      transition: all 0.2s ease;
+      transition: all 0.25s ease;
       display: flex;
       flex-direction: column;
-      gap: 0.2rem;
+      gap: 0.25rem;
     }
 
     .stage-item.pending {
@@ -341,56 +337,65 @@
     }
 
     .stage-item.running {
+      opacity: 1;
       border-color: var(--primary);
-      background: rgba(56, 189, 248, 0.08);
-      box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+      background: rgba(56, 189, 248, 0.12);
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
     }
 
     .stage-item.completed {
-      border-color: rgba(16, 185, 129, 0.4);
-      background: rgba(16, 185, 129, 0.06);
+      opacity: 1;
+      border-color: rgba(16, 185, 129, 0.5);
+      background: rgba(16, 185, 129, 0.08);
     }
 
     .stage-name {
       font-weight: 600;
       color: var(--text-main);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
     }
 
     .stage-status {
       font-family: var(--font-mono);
-      font-size: 0.65rem;
+      font-size: 0.68rem;
       color: var(--text-dim);
     }
 
-    /* Live Stream Log */
+    .stage-item.running .stage-status {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .stage-item.completed .stage-status {
+      color: var(--accent-green);
+      font-weight: 600;
+    }
+
     .stream-log {
       margin-top: 0.75rem;
-      max-height: 120px;
+      max-height: 130px;
       overflow-y: auto;
       font-family: var(--font-mono);
       font-size: 0.72rem;
       color: var(--text-muted);
       background: rgba(0, 0, 0, 0.4);
-      padding: 0.5rem 0.75rem;
+      padding: 0.6rem 0.8rem;
       border-radius: var(--radius-sm);
       border: 1px solid rgba(255, 255, 255, 0.05);
     }
 
     .stream-line {
-      line-height: 1.4;
+      line-height: 1.45;
       display: flex;
       gap: 0.5rem;
+      margin-bottom: 0.2rem;
     }
 
     .stream-seq {
       color: var(--primary);
       user-select: none;
+      min-width: 32px;
     }
 
-    /* Results Section */
     .results-panel {
       display: none;
       flex-direction: column;
@@ -398,13 +403,13 @@
     }
 
     .summary-card {
-      background: linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8));
-      border: 1px solid rgba(56, 189, 248, 0.2);
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.75), rgba(15, 23, 42, 0.85));
+      border: 1px solid rgba(56, 189, 248, 0.25);
       border-radius: var(--radius-md);
-      padding: 1.25rem;
+      padding: 1.35rem;
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      gap: 0.85rem;
     }
 
     .summary-header {
@@ -419,6 +424,7 @@
       display: flex;
       align-items: center;
       gap: 0.5rem;
+      flex-wrap: wrap;
     }
 
     .status-badge {
@@ -433,7 +439,8 @@
     .status-answered { background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); }
     .status-blocked { background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); }
     .status-refused { background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); }
-    .status-clarify { background: rgba(168, 85, 247, 0.18); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); }
+    .status-clarification, .status-clarify { background: rgba(168, 85, 247, 0.18); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); }
+    .status-insufficient_evidence { background: rgba(245, 158, 11, 0.18); color: #fde047; border: 1px solid rgba(245, 158, 11, 0.35); }
 
     .route-badge {
       font-size: 0.72rem;
@@ -443,6 +450,7 @@
       color: var(--primary);
       border: 1px solid rgba(56, 189, 248, 0.25);
       font-family: var(--font-mono);
+      font-weight: 600;
     }
 
     .governed-badge {
@@ -452,13 +460,24 @@
       background: rgba(34, 197, 94, 0.12);
       color: #4ade80;
       border: 1px solid rgba(34, 197, 94, 0.25);
+      font-weight: 600;
     }
 
     .conclusion-text {
-      font-size: 1.15rem;
+      font-size: 1.2rem;
       font-weight: 600;
       color: #ffffff;
-      line-height: 1.4;
+      line-height: 1.45;
+    }
+
+    .causal-note {
+      background: rgba(245, 158, 11, 0.1);
+      border-left: 3px solid var(--accent-amber);
+      padding: 0.5rem 0.75rem;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      font-size: 0.78rem;
+      color: #fde68a;
+      display: none;
     }
 
     .scope-meta {
@@ -476,7 +495,6 @@
       color: var(--text-main);
     }
 
-    /* Grid Layout for Details */
     .grid-2col {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -493,7 +511,7 @@
       background: rgba(0, 0, 0, 0.25);
       border: 1px solid var(--border-color);
       border-radius: var(--radius-md);
-      padding: 1rem;
+      padding: 1.1rem;
       display: flex;
       flex-direction: column;
       gap: 0.75rem;
@@ -510,7 +528,6 @@
       justify-content: space-between;
     }
 
-    /* SQL Block */
     .code-container {
       position: relative;
     }
@@ -525,7 +542,8 @@
       color: #38bdf8;
       overflow-x: auto;
       white-space: pre-wrap;
-      word-break: break-all;
+      word-break: break-word;
+      max-height: 240px;
     }
 
     .copy-btn {
@@ -546,7 +564,6 @@
       background: rgba(255, 255, 255, 0.2);
     }
 
-    /* Evidence Table */
     .evidence-table {
       width: 100%;
       border-collapse: collapse;
@@ -583,20 +600,19 @@
       color: var(--text-muted);
     }
 
-    /* Narrative Box */
     .narrative-box {
       font-size: 0.85rem;
       line-height: 1.6;
       color: #d1d5db;
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: 0.6rem;
     }
 
     .narrative-section {
       background: rgba(255, 255, 255, 0.02);
       border-left: 2px solid var(--primary);
-      padding: 0.5rem 0.75rem;
+      padding: 0.55rem 0.75rem;
       border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     }
 
@@ -608,13 +624,11 @@
       margin-bottom: 0.25rem;
     }
 
-    /* Data Table */
     .data-table-container {
       max-height: 220px;
       overflow-y: auto;
     }
 
-    /* JSON Inspector */
     details summary {
       cursor: pointer;
       font-size: 0.78rem;
@@ -640,7 +654,6 @@
       white-space: pre-wrap;
     }
 
-    /* Footer */
     footer {
       border-top: 1px solid var(--border-color);
       padding: 1rem 1.5rem;
@@ -678,7 +691,6 @@
   </header>
 
   <main>
-    <!-- Query Input Section -->
     <section class="panel">
       <div class="panel-header">
         <h2 class="panel-title">
@@ -695,8 +707,8 @@
       <div class="input-actions">
         <div class="quick-prompts">
           <span style="font-size: 0.72rem; color: var(--text-dim); margin-right: 0.25rem;">Quick Prompts:</span>
-          <button class="prompt-chip" onclick="setQuery('What was revenue in 2018?')">⚡ Revenue 2018 (Fast-Path)</button>
-          <button class="prompt-chip" onclick="setQuery('How many orders were there in August 2018?')">⚡ Orders Aug 2018</button>
+          <button class="prompt-chip" onclick="setQuery('what are the total order count in 2018')">⚡ Orders 2018</button>
+          <button class="prompt-chip" onclick="setQuery('What was revenue in 2018?')">⚡ Revenue 2018</button>
           <button class="prompt-chip" onclick="setQuery('Why did revenue drop in August 2017?')">🔍 Revenue Diagnostic 2017</button>
           <button class="prompt-chip" onclick="setQuery('DROP TABLE orders;')">🛡️ Injection Guard Test</button>
           <button class="prompt-chip" onclick="setQuery('What was customer NPS in 2018?')">🚫 Out-of-Catalog Refusal</button>
@@ -768,6 +780,9 @@
         </div>
         <div class="conclusion-text" id="resConclusion">
           --
+        </div>
+        <div class="causal-note" id="resCausalNote">
+          <strong>⚠️ Causal Boundary Note:</strong> <span id="resCausalText"></span>
         </div>
         <div class="scope-meta" id="resScopeMeta">
           <span class="meta-item">Metric: <strong id="scopeMetric">--</strong></span>
@@ -873,6 +888,7 @@
       });
       document.getElementById('streamLog').innerHTML = '';
       document.getElementById('resultsPanel').style.display = 'none';
+      document.getElementById('resCausalNote').style.display = 'none';
     }
 
     function appendStreamLog(seq, text) {
@@ -906,7 +922,7 @@
       resetPipeline();
 
       const sessionId = 'web-sess-' + Date.now();
-      appendStreamLog(0, 'Submitting query to /api/ask...');
+      appendStreamLog('•', 'Submitting query to /api/ask...');
 
       try {
         const res = await fetch('/api/ask', {
@@ -925,9 +941,9 @@
         const data = await res.json();
         const runId = data.run_id;
         document.getElementById('runIdDisplay').textContent = 'RUN: ' + runId.slice(0, 8);
-        appendStreamLog(1, 'Run registered: ' + runId + '. Opening SSE stream...');
+        appendStreamLog('1', 'Run registered: ' + runId + '. Opening SSE stream...');
 
-        // Connect SSE
+        // Connect SSE with all named event listeners
         listenToStream(runId);
 
       } catch (err) {
@@ -943,7 +959,7 @@
 
       currentEventSource = new EventSource('/api/runs/' + runId + '/events');
 
-      currentEventSource.onmessage = (e) => {
+      const onEvent = (e) => {
         try {
           const event = JSON.parse(e.data);
           handlePipelineEvent(event, runId);
@@ -952,37 +968,46 @@
         }
       };
 
+      // Listen to all named SSE event types
+      const eventTypes = ['message', 'step_started', 'step_finished', 'answer', 'error', 'clarify'];
+      eventTypes.forEach(t => currentEventSource.addEventListener(t, onEvent));
+
       currentEventSource.onerror = () => {
-        // SSE disconnected or finished
-        currentEventSource.close();
-        currentEventSource = null;
+        if (currentEventSource) {
+          currentEventSource.close();
+          currentEventSource = null;
+        }
         fetchEnvelope(runId);
       };
     }
 
     function handlePipelineEvent(event, runId) {
-      appendStreamLog(event.seq, `${event.step || event.type}: ${event.message || JSON.stringify(event.payload || {})}`);
+      const comp = (event.component || '').toLowerCase();
+      const stepStr = String(event.step || '');
+      const summary = event.summary || event.message || event.detail || '';
+      appendStreamLog(event.seq, `${event.component || event.type}: ${summary}`);
 
-      const step = (event.step || '').toLowerCase();
-      if (step.includes('guard')) {
-        updateStageStatus('guard', event.type === 'step_completed' ? 'completed' : 'running');
-      } else if (step.includes('router') || step.includes('intent')) {
-        updateStageStatus('router', event.type === 'step_completed' ? 'completed' : 'running');
-      } else if (step.includes('resolver') || step.includes('metric')) {
-        updateStageStatus('resolver', event.type === 'step_completed' ? 'completed' : 'running');
-      } else if (step.includes('sql') || step.includes('generator') || step.includes('compiler')) {
-        updateStageStatus('sql', event.type === 'step_completed' ? 'completed' : 'running');
-      } else if (step.includes('validator') || step.includes('ast')) {
-        updateStageStatus('validator', event.type === 'step_completed' ? 'completed' : 'running');
-      } else if (step.includes('executor') || step.includes('gateway') || step.includes('query')) {
-        updateStageStatus('executor', event.type === 'step_completed' ? 'completed' : 'running');
-      } else if (step.includes('reconcil')) {
-        updateStageStatus('reconciler', event.type === 'step_completed' ? 'completed' : 'running');
-      } else if (step.includes('fact') || step.includes('ledger')) {
-        updateStageStatus('fact_checker', event.type === 'step_completed' ? 'completed' : 'running');
+      // Map component to UI stage
+      let stageId = null;
+      if (comp.includes('guard') || stepStr === '1') stageId = 'guard';
+      else if (comp.includes('router') || stepStr === '2') stageId = 'router';
+      else if (comp.includes('resolver') || stepStr === '3') stageId = 'resolver';
+      else if (comp.includes('compiler') || comp.includes('generator') || comp.includes('retriever') || stepStr === '7' || stepStr === '4') stageId = 'sql';
+      else if (comp.includes('validator') || stepStr === '5' || stepStr === '8') stageId = 'validator';
+      else if (comp.includes('executor') || comp.includes('gateway') || stepStr === '6' || stepStr === '9') stageId = 'executor';
+      else if (comp.includes('reconcil') || comp.includes('analyst') || stepStr === '10' || stepStr === '11') stageId = 'reconciler';
+      else if (comp.includes('ledger') || comp.includes('fact') || stepStr === '12' || stepStr === '14') stageId = 'fact_checker';
+
+      if (stageId) {
+        if (event.type === 'step_started') {
+          updateStageStatus(stageId, 'running', 'RUNNING');
+        } else if (event.type === 'step_finished') {
+          const dur = (event.duration_ms !== undefined && event.duration_ms !== null) ? `${event.duration_ms}ms` : 'PASS';
+          updateStageStatus(stageId, 'completed', dur);
+        }
       }
 
-      if (event.type === 'run_completed' || event.step === 'run_completed') {
+      if (event.type === 'answer' || event.type === 'error' || event.type === 'clarify') {
         if (currentEventSource) {
           currentEventSource.close();
           currentEventSource = null;
@@ -1010,6 +1035,16 @@
       const panel = document.getElementById('resultsPanel');
       panel.style.display = 'flex';
 
+      // Mark all passing stages as completed if answered
+      if (env.status === 'answered' || env.status === 'ok') {
+        ['guard', 'router', 'resolver', 'sql', 'validator', 'executor', 'reconciler', 'fact_checker'].forEach(s => {
+          const item = document.getElementById('stage-' + s);
+          if (item && !item.classList.contains('completed')) {
+            updateStageStatus(s, 'completed', 'PASS');
+          }
+        });
+      }
+
       // Status Badge
       const statusBadge = document.getElementById('resStatusBadge');
       const status = env.status || 'answered';
@@ -1025,14 +1060,29 @@
       const govBadge = document.getElementById('resGovernedBadge');
       if (governed) {
         govBadge.textContent = 'GOVERNED KPI';
+        govBadge.className = 'governed-badge';
         govBadge.style.display = 'inline-block';
       } else {
         govBadge.textContent = 'AD-HOC SQL';
+        govBadge.className = 'route-badge';
         govBadge.style.display = 'inline-block';
+      }
+
+      // Execution Time & Metrics
+      if (env.run_metrics && env.run_metrics.latency_ms !== undefined) {
+        document.getElementById('resExecutionTime').textContent = 
+          `Completed in ${env.run_metrics.latency_ms} ms (${env.run_metrics.queries || 1} query, ${env.run_metrics.rows || 1} row)`;
       }
 
       // Conclusion
       document.getElementById('resConclusion').textContent = env.conclusion || 'No narrative conclusion provided.';
+
+      // Causal Boundary Note
+      if (env.causal_boundary_note) {
+        const note = document.getElementById('resCausalNote');
+        document.getElementById('resCausalText').textContent = env.causal_boundary_note;
+        note.style.display = 'block';
+      }
 
       // Scope
       document.getElementById('scopeMetric').textContent = (env.scope && env.scope.metric) || 'None';
@@ -1051,16 +1101,29 @@
         narrativeBox.innerHTML = `<p style="color: var(--text-muted); font-style: italic;">Direct single-point answer. No multi-factor narrative required.</p>`;
       }
 
-      // SQL Box
-      const sqlObj = env.sql;
+      // SQL Box Extraction: checks queries list from AnswerEnvelope contract
+      let sqlText = null;
+      let sqlOrigin = 'NONE';
+      let sqlDuration = null;
+
+      if (env.queries && env.queries.length > 0) {
+        const q = env.queries[0];
+        sqlText = q.sql;
+        sqlOrigin = (q.origin || 'compiler').toUpperCase();
+        sqlDuration = q.duration_ms;
+      } else if (env.sql && env.sql.sql) {
+        sqlText = env.sql.sql;
+        sqlOrigin = (env.sql.origin || 'gateway').toUpperCase();
+      }
+
       const sqlCode = document.getElementById('resSqlCode');
-      const sqlOrigin = document.getElementById('sqlOriginBadge');
-      if (sqlObj && sqlObj.sql) {
-        sqlCode.textContent = formatSql(sqlObj.sql);
-        sqlOrigin.textContent = (sqlObj.origin || 'SQL GATEWAY').toUpperCase();
+      const originBadge = document.getElementById('sqlOriginBadge');
+      if (sqlText) {
+        sqlCode.textContent = formatSql(sqlText);
+        originBadge.textContent = sqlOrigin + (sqlDuration !== null && sqlDuration !== undefined ? ` (${sqlDuration}ms)` : '');
       } else {
         sqlCode.textContent = '-- No SQL executed (Answer resolved via refusal, ingress block, or cached total)';
-        sqlOrigin.textContent = 'NONE';
+        originBadge.textContent = 'NONE';
       }
 
       // Evidence Claims
@@ -1072,7 +1135,7 @@
           row.innerHTML = `
             <td><span class="claim-tag">${c.claim_id}</span></td>
             <td>${escapeHtml(c.text)}</td>
-            <td><span class="grade-badge">Grade ${c.grade !== undefined ? c.grade : '4'}</span></td>
+            <td><span class="grade-badge">Grade ${c.grade !== undefined ? c.grade : '1'}</span></td>
             <td><span style="color: var(--accent-green);">✓ Verified</span></td>
           `;
           tbody.appendChild(row);
@@ -1123,16 +1186,8 @@
     }
 
     function formatSql(sql) {
-      return sql.replace(/\s+/g, ' ')
-        .replace(/\bSELECT\b/gi, '\nSELECT')
-        .replace(/\bFROM\b/gi, '\nFROM')
-        .replace(/\bWHERE\b/gi, '\nWHERE')
-        .replace(/\bGROUP BY\b/gi, '\nGROUP BY')
-        .replace(/\bORDER BY\b/gi, '\nORDER BY')
-        .replace(/\bLIMIT\b/gi, '\nLIMIT')
-        .replace(/\bLEFT JOIN\b/gi, '\n  LEFT JOIN')
-        .replace(/\bINNER JOIN\b/gi, '\n  INNER JOIN')
-        .trim();
+      if (!sql) return '';
+      return sql.replace(/\r\n/g, '\n').trim();
     }
 
     function copySql() {
