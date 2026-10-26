@@ -174,6 +174,52 @@ class EvidenceLedger:
                 claims.append(claim)
                 next_id += 1
 
+        if len(outcome.executions) >= 2:
+            exec1 = outcome.executions[0]
+            exec2 = outcome.executions[1]
+            val1 = _as_number(exec1.rows[0][0]) if exec1.rows and exec1.rows[0] else None
+            val2 = _as_number(exec2.rows[0][0]) if exec2.rows and exec2.rows[0] else None
+            if val1 is not None and val2 is not None:
+                diff = val1 - val2
+                derived_values = [
+                    diff,
+                    abs(diff),
+                    round(diff, 2),
+                    abs(round(diff, 2)),
+                ]
+                if val2 != 0:
+                    pct = (diff / val2) * 100.0
+                    derived_values.extend([
+                        pct,
+                        abs(pct),
+                        round(pct, 2),
+                        abs(round(pct, 2)),
+                        round(pct, 1),
+                        abs(round(pct, 1)),
+                    ])
+                if hasattr(outcome, "router") and outcome.router and getattr(outcome.router, "slots", None):
+                    time_slot = outcome.router.slots.time
+                    if time_slot.current:
+                        derived_values.append(float(time_slot.current.start.year))
+                        if time_slot.current.start.month:
+                            derived_values.append(float(time_slot.current.start.month))
+                    if time_slot.comparison:
+                        derived_values.append(float(time_slot.comparison.start.year))
+                        if time_slot.comparison.start.month:
+                            derived_values.append(float(time_slot.comparison.start.month))
+                for q in getattr(outcome, "queries", ()):
+                    for year_str in re.findall(r"\b(20\d{2})\b", getattr(q, "sql", "")):
+                        derived_values.append(float(year_str))
+                claim = _query_claim(
+                    f"C{next_id}",
+                    f"{exec1.query_id}+{exec2.query_id}",
+                    derived_values,
+                    0,
+                )
+                if claim is not None:
+                    claims.append(claim)
+                    next_id += 1
+
         return Ledger(
             run_id=run_id,
             claims=tuple(claims),

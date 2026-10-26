@@ -195,6 +195,8 @@ _LOOKUP_CUES = (
     "average",
     "total",
     "compare",
+    "compared",
+    "difference",
     "versus",
     " vs ",
     "trend",
@@ -203,6 +205,12 @@ _LOOKUP_CUES = (
 )
 _COMPARATIVE_CUES = (
     "compare",
+    "compared",
+    "comparing",
+    "comparison",
+    "difference",
+    "differences",
+    "different",
     "versus",
     " vs ",
     "growth",
@@ -332,29 +340,55 @@ def _time_slot(question: str, reference_date: date) -> TimeSlot:
     normalized = _normalize(question)
     grain = _grain_phrase(normalized)
 
-    month_match = _MONTH_PATTERN.search(question)
-    if month_match is not None:
-        month = _MONTHS[month_match.group(1).lower()]
-        year = int(month_match.group(2))
+    month_matches = list(_MONTH_PATTERN.finditer(question))
+    if len(month_matches) >= 2:
+        m1 = _MONTHS[month_matches[0].group(1).lower()]
+        y1 = int(month_matches[0].group(2))
+        m2 = _MONTHS[month_matches[1].group(1).lower()]
+        y2 = int(month_matches[1].group(2))
+        current = _month_period(y1, m1)
+        comparison = _month_period(y2, m2)
+        return TimeSlot(
+            raw=f"{month_matches[0].group(0)} vs {month_matches[1].group(0)}",
+            current=current,
+            comparison=comparison,
+            grain="month",
+        )
+    if len(month_matches) == 1:
+        month = _MONTHS[month_matches[0].group(1).lower()]
+        year = int(month_matches[0].group(2))
         current = _month_period(year, month)
         return TimeSlot(
-            raw=month_match.group(0),
+            raw=month_matches[0].group(0),
             current=current,
             comparison=_previous_period(current),
             grain="month",
         )
 
-    quarter_match = _QUARTER_PATTERN.search(question)
-    if quarter_match is not None:
-        quarter = int(quarter_match.group(1))
+    quarter_matches = list(_QUARTER_PATTERN.finditer(question))
+    if len(quarter_matches) >= 2:
+        q1 = int(quarter_matches[0].group(1))
+        y1 = int(quarter_matches[0].group(2)) if quarter_matches[0].group(2) else reference_date.year
+        q2 = int(quarter_matches[1].group(1))
+        y2 = int(quarter_matches[1].group(2)) if quarter_matches[1].group(2) else reference_date.year
+        current = _quarter_period(y1, q1)
+        comparison = _quarter_period(y2, q2)
+        return TimeSlot(
+            raw=f"{quarter_matches[0].group(0)} vs {quarter_matches[1].group(0)}",
+            current=current,
+            comparison=comparison,
+            grain="quarter",
+        )
+    if len(quarter_matches) == 1:
+        quarter = int(quarter_matches[0].group(1))
         year = (
-            int(quarter_match.group(2))
-            if quarter_match.group(2)
+            int(quarter_matches[0].group(2))
+            if quarter_matches[0].group(2)
             else reference_date.year
         )
         current = _quarter_period(year, quarter)
         return TimeSlot(
-            raw=quarter_match.group(0),
+            raw=quarter_matches[0].group(0),
             current=current,
             comparison=_previous_period(current),
             grain="quarter",
@@ -381,11 +415,20 @@ def _time_slot(question: str, reference_date: date) -> TimeSlot:
             grain="quarter",
         )
 
-    year_match = _YEAR_PATTERN.search(question)
-    if year_match is not None:
-        current = _year_period(int(year_match.group(1)))
+    years = _YEAR_PATTERN.findall(question)
+    if len(years) >= 2:
+        current = _year_period(int(years[0]))
+        comparison = _year_period(int(years[1]))
         return TimeSlot(
-            raw=year_match.group(0),
+            raw=f"{years[0]} vs {years[1]}",
+            current=current,
+            comparison=comparison,
+            grain=grain or "year",
+        )
+    if len(years) == 1:
+        current = _year_period(int(years[0]))
+        return TimeSlot(
+            raw=years[0],
             current=current,
             comparison=_previous_period(current),
             grain=grain or "year",

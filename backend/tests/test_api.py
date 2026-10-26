@@ -208,3 +208,25 @@ def test_fully_hallucinated_narrative_falls_back_to_ledger(tmp_path: Path) -> No
     assert envelope["status"] == "answered"
     assert envelope["conclusion"] == "The governed result is 6,512."
     assert "999" not in envelope["conclusion"]
+
+
+def test_ask_comparative_lookup_returns_answered_with_verified_difference(
+    client: TestClient,
+) -> None:
+    run_id = _ask(client, "difference in total sales in 2018 compared to 2017")
+
+    events = _events(client, run_id)
+    assert events[-1]["type"] == "answer"
+    assert events[-1]["status"] == "answered"
+
+    response = client.get(f"/api/runs/{run_id}")
+    assert response.status_code == 200
+    envelope = response.json()
+    assert envelope["run_id"] == run_id
+    assert envelope["status"] == "answered"
+    assert "8,594,831.98" in envelope["conclusion"]
+    assert "7,092,491.65" in envelope["conclusion"]
+    assert "1,502,340.33" in envelope["conclusion"]
+    assert "21.18%" in envelope["conclusion"]
+    assert len(envelope["queries"]) == 2
+    assert envelope["run_metrics"]["queries"] == 2

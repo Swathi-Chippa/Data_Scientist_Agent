@@ -7,6 +7,7 @@ lets an analyst open a connection or generate SQL.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -170,7 +171,7 @@ class Orchestrator:
             self._check_token_budget(state, route)
             self._check_wall_budget(state)
             if route.primary_route == "lookup":
-                self._lookup(question, state)
+                self._lookup(question, route, state)
                 return self._finish(
                     state,
                     route,
@@ -241,7 +242,12 @@ class Orchestrator:
             reason=f"Unsupported route: {route.primary_route}",
         )
 
-    def _lookup(self, question: str, state: _RunState) -> None:
+    def _lookup(
+        self,
+        question: str,
+        route: RouterResult,
+        state: _RunState,
+    ) -> None:
         resolution = self._resolver.resolve(question, use_model=False)
         if resolution.coverage != "full" or resolution.definition is None:
             raise ValueError(
@@ -254,40 +260,111 @@ class Orchestrator:
             for item in resolution.resolved_dimensions
             if item.allowed
         )
-        compiled = self._compiler.compile(
-            definition,
-            dimensions=dimensions,
-            filters=resolution.filters,
-            period=resolution.period,
-            time_grain=resolution.time_grain,
-        )
-        execution, _ = self._execute(
-            compiled.candidate.sql,
-            purpose="lookup",
-            state=state,
-        )
-        if execution.status not in ("ok", "truncated"):
-            raise RuntimeError(
-                f"The lookup query returned {execution.status}: "
-                f"{execution.error.message if execution.error else 'unknown'}"
-            )
-        reconciliation = self._reconciler.reconcile(
-            execution,
-            expected_grain=compiled.candidate.grain,
-            join_path=definition.join_path,
-        )
-        state.candidate = compiled.candidate
-        state.validation = compiled.validation
-        state.execution = execution
-        state.reconciliation = reconciliation
-        state.plan.append(
-            PlanStep(
-                step_id="lookup",
-                module="lookup",
-                depends_on=("route",),
-                status="completed",
+
+        is_comparative = (
+            route.intent_label == "Comparative"
+            or any(
+                _contains(_normalize(question), word)
+                for word in ("difference", "differences", "compared", "compare", "versus", "vs")
             )
         )
+        current_period = route.slots.time.current or resolution.period
+        comparison_period = route.slots.time.comparison
+
+        if is_comparative and current_period is not None and comparison_period is not None:
+            current_compiled = self._compiler.compile(
+                definition,
+                dimensions=dimensions,
+                filters=resolution.filters,
+                period=current_period,
+                time_grain=resolution.time_grain,
+            )
+            current_execution, _ = self._execute(
+                current_compiled.candidate.sql,
+                purpose="current_lookup",
+                state=state,
+            )
+            if current_execution.status not in ("ok", "truncated"):
+                raise RuntimeError(
+                    f"The lookup query returned {current_execution.status}: "
+                    f"{current_execution.error.message if current_execution.error else 'unknown'}"
+                )
+            current_reconciliation = self._reconciler.reconcile(
+                current_execution,
+                expected_grain=current_compiled.candidate.grain,
+                join_path=definition.join_path,
+            )
+
+            comparison_compiled = self._compiler.compile(
+                definition,
+                dimensions=dimensions,
+                filters=resolution.filters,
+                period=comparison_period,
+                time_grain=resolution.time_grain,
+            )
+            comparison_execution, _ = self._execute(
+                comparison_compiled.candidate.sql,
+                purpose="comparison_lookup",
+                state=state,
+            )
+            if comparison_execution.status not in ("ok", "truncated"):
+                raise RuntimeError(
+                    f"The comparison lookup query returned {comparison_execution.status}: "
+                    f"{comparison_execution.error.message if comparison_execution.error else 'unknown'}"
+                )
+            self._reconciler.reconcile(
+                comparison_execution,
+                expected_grain=comparison_compiled.candidate.grain,
+                join_path=definition.join_path,
+            )
+
+            state.candidate = current_compiled.candidate
+            state.validation = current_compiled.validation
+            state.execution = current_execution
+            state.reconciliation = current_reconciliation
+            state.plan.append(
+                PlanStep(
+                    step_id="lookup",
+                    module="lookup",
+                    depends_on=("route",),
+                    status="completed",
+                )
+            )
+        else:
+            compiled = self._compiler.compile(
+                definition,
+                dimensions=dimensions,
+                filters=resolution.filters,
+                period=resolution.period,
+                time_grain=resolution.time_grain,
+            )
+            execution, _ = self._execute(
+                compiled.candidate.sql,
+                purpose="lookup",
+                state=state,
+            )
+            if execution.status not in ("ok", "truncated"):
+                raise RuntimeError(
+                    f"The lookup query returned {execution.status}: "
+                    f"{execution.error.message if execution.error else 'unknown'}"
+                )
+            reconciliation = self._reconciler.reconcile(
+                execution,
+                expected_grain=compiled.candidate.grain,
+                join_path=definition.join_path,
+            )
+            state.candidate = compiled.candidate
+            state.validation = compiled.validation
+            state.execution = execution
+            state.reconciliation = reconciliation
+            state.plan.append(
+                PlanStep(
+                    step_id="lookup",
+                    module="lookup",
+                    depends_on=("route",),
+                    status="completed",
+                )
+            )
 
     def _anomaly(
         self,
@@ -639,6 +716,19 @@ def _contribution_table(
         uri=f"inline://{query_id}",
         rows=tuple(rows),
     )
+
+
+def _normalize(text: str) -> str:
+    lowered = text.lower().replace("&", " and ")
+    lowered = re.sub(r"[_\-/]+", " ", lowered)
+    lowered = re.sub(r"[^\w\s]", " ", lowered)
+    return " ".join(lowered.split())
+
+
+def _contains(text: str, phrase: str) -> bool:
+    if not phrase:
+        return False
+    return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
 
 
 __all__ = ["BudgetExceeded", "Orchestrator"]

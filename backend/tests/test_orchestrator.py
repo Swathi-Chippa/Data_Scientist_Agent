@@ -187,6 +187,19 @@ def test_governed_lookup_is_routed_through_compiler_and_executed():
     assert [step.module for step in outcome.plan] == ["router", "lookup"]
 
 
+def test_comparative_lookup_executes_two_queries_and_completes():
+    executor = FakeExecutor(scalar=500)
+    outcome = _orchestrator(executor).run("difference in total sales in 2018 compared to 2017")
+
+    assert outcome.status == "ok"
+    assert outcome.route_labels == ("lookup",)
+    assert outcome.intent_label == "Comparative"
+    assert len(outcome.queries) == 2
+    assert outcome.queries[0].purpose == "current_lookup"
+    assert outcome.queries[1].purpose == "comparison_lookup"
+    assert len(outcome.executions) == 2
+
+
 def test_low_confidence_question_stops_with_clarification_and_no_query():
     executor = FakeExecutor()
     outcome = _orchestrator(executor).run("How are sales doing?")

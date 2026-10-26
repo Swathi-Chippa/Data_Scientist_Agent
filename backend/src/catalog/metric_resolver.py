@@ -86,6 +86,14 @@ _STOPWORDS = frozenset(
     was we were what when where which who why will with would you your
     """.split()
 )
+_COMPARATIVE_WORDS = frozenset(
+    """
+    difference differences different differ
+    compare compared comparing comparison
+    versus vs growth change changed changing
+    net delta increase decrease decline drop fell rose
+    """.split()
+)
 
 
 def _normalize(text: str) -> str:
@@ -349,7 +357,9 @@ class MetricResolver:
         return tuple(
             token
             for token in remaining.split()
-            if token not in _STOPWORDS and not token.isdigit()
+            if token not in _STOPWORDS
+            and token not in _COMPARATIVE_WORDS
+            and not token.isdigit()
         )
 
     def _resolution(

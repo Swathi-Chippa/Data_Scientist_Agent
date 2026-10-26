@@ -841,6 +841,46 @@ def _default_narrative(
                 f"The largest contributor was {top.value}, with an attributed "
                 f"change of {format_number(top.contribution)}."
             )
+    if len(outcome.executions) >= 2 and (
+        getattr(outcome.router, "intent_label", None) == "Comparative"
+        or any(
+            getattr(q, "purpose", "") in ("current_lookup", "comparison_lookup")
+            for q in getattr(outcome, "queries", ())
+        )
+    ):
+        exec1 = outcome.executions[0]
+        exec2 = outcome.executions[1]
+        raw1 = exec1.rows[0][0] if exec1.rows and exec1.rows[0] else None
+        raw2 = exec2.rows[0][0] if exec2.rows and exec2.rows[0] else None
+        if (
+            raw1 is not None
+            and raw2 is not None
+            and not isinstance(raw1, bool)
+            and not isinstance(raw2, bool)
+            and isinstance(raw1, (int, float))
+            and isinstance(raw2, (int, float))
+        ):
+            val1 = float(raw1)
+            val2 = float(raw2)
+            diff = val1 - val2
+            pct = (diff / val2 * 100.0) if val2 != 0 else 0.0
+            slots = getattr(outcome.router, "slots", None)
+            metric_term = (
+                slots.metric_terms[0]
+                if slots and slots.metric_terms
+                else "metric"
+            )
+            metric_name = metric_term.replace("_", " ")
+            t1 = slots.time.current if slots and slots.time else None
+            t2 = slots.time.comparison if slots and slots.time else None
+            period1_str = str(t1.start.year) if t1 else "the current period"
+            period2_str = str(t2.start.year) if t2 else "the comparison period"
+            change_word = "an increase" if diff >= 0 else "a decrease"
+            return (
+                f"The governed {metric_name} in {period1_str} was {format_number(val1)} "
+                f"compared to {format_number(val2)} in {period2_str}, representing "
+                f"{change_word} of {format_number(abs(diff))} ({format_number(abs(round(pct, 2)))}%)."
+            )
     for execution in reversed(outcome.executions):
         for row in execution.rows or ():
             for value in row:

@@ -214,6 +214,16 @@ def test_period_parser_handles_quarters_and_years():
     assert year.slots.time.grain == "year"
 
 
+def test_comparative_question_extracts_two_periods_and_comparative_intent():
+    router = _router()
+    route = router.route("difference in total sales in 2018 compared to 2017")
+    assert route.primary_route == "lookup"
+    assert route.intent_label == "Comparative"
+    assert route.slots.time.current == _period("2018-01-01", "2019-01-01")
+    assert route.slots.time.comparison == _period("2017-01-01", "2018-01-01")
+    assert route.slots.metric_terms == ("revenue",)
+
+
 def _period(start: str, end: str):
     from contracts.models import Period
 
