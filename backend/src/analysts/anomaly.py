@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import date, datetime, timedelta
 from statistics import NormalDist
@@ -19,10 +20,47 @@ from contracts.models import (
 _DATE_PATTERN = re.compile(r"^(\d{4})-(\d{2})(?:-(\d{2}))?$")
 _QUARTER_PATTERN = re.compile(r"^(\d{4})-?Q([1-4])$", re.IGNORECASE)
 _YEAR_PATTERN = re.compile(r"^(\d{4})$")
+_TIME_NAMES = {"month", "period", "date", "week", "quarter", "year"}
+_VOLUME_NAMES = {
+    "count",
+    "n",
+    "n_obs",
+    "num_observations",
+    "observation_count",
+    "observations",
+    "row_count",
+    "sample_size",
+    "support",
+    "volume",
+}
 
 
 class AnomalyAnalyst:
+    """Analyze one prepared series with explicit, configurable safeguards."""
+
     module = "anomaly"
+
+    def __init__(
+        self,
+        *,
+        min_history_periods: int = 12,
+        min_observations: int = 30,
+        zero_baseline_tolerance: float = 1e-9,
+    ) -> None:
+        if min_history_periods < 1:
+            raise ValueError("min_history_periods must be at least 1")
+        if min_observations < 1:
+            raise ValueError("min_observations must be at least 1")
+        if (
+            not math.isfinite(zero_baseline_tolerance)
+            or zero_baseline_tolerance < 0.0
+        ):
+            raise ValueError(
+                "zero_baseline_tolerance must be a finite non-negative number"
+            )
+        self.min_history_periods = min_history_periods
+        self.min_observations = min_observations
+        self.zero_baseline_tolerance = zero_baseline_tolerance
 
     def run(self, analyst_input: AnalystInput) -> AnalystOutput:
         table = analyst_input.tables.get("series")
@@ -40,7 +78,7 @@ class AnomalyAnalyst:
                 table,
             )
 
-        columns = _series_columns(table)
+        columns = _series_columns(table, params.metric)
         if columns is None:
             return _insufficient(
                 "The series table needs a time column and a numeric measure "
@@ -48,8 +86,16 @@ class AnomalyAnalyst:
                 analyst_input,
                 table,
             )
-        time_index, value_index = columns
-        series = _aggregate_series(table, time_index, value_index, params.grain)
+        time_index, value_index, volume_index = columns
+        series, volumes, problem = _aggregate_series(
+            table,
+            time_index,
+            value_index,
+            volume_index,
+            params.grain,
+        )
+        if problem is not None:
+            return _insufficient(problem, analyst_input, table)
         if not series:
             return _insufficient(
                 "No usable time periods were found in the series table.",
@@ -57,61 +103,132 @@ class AnomalyAnalyst:
                 table,
             )
 
-        test_rows = [
-            (period, value)
-            for period, value in series
-            if params.test_window.start <= period < params.test_window.end
-        ]
+        test_rows = _complete_periods(series, params.test_window, params.grain)
         if not test_rows:
             return _insufficient(
-                "No observations fall inside the requested test window.",
+                "No complete observations fall inside the requested test "
+                "window.",
                 analyst_input,
                 table,
             )
-        actual = float(sum(value for _, value in test_rows))
-        if actual < params.min_volume:
+        expected_test_periods = _periods_in_window(
+            params.test_window,
+            params.grain,
+        )
+        if [period for period, _ in test_rows] != expected_test_periods:
             return _insufficient(
-                "The result volume is below the minimum-volume threshold; "
-                "there is not enough data to call an anomaly.",
+                "The test window is missing complete periods; complete "
+                "consecutive periods are required for an anomaly call.",
+                analyst_input,
+                table,
+            )
+        try:
+            actual = math.fsum(value for _, value in test_rows)
+        except OverflowError:
+            return _insufficient(
+                "The test-window values overflow while being aggregated.",
                 analyst_input,
                 table,
             )
 
-        history = [
+        history_end = (
+            params.history_window.end
+            if params.history_window is not None
+            else params.test_window.start
+        )
+        requested_history = [
             (period, value)
             for period, value in series
             if period < params.test_window.start
+            and (
+                params.history_window is None
+                or params.history_window.start <= period
+            )
+            and _period_end(period, params.grain) <= history_end
         ]
-        if params.history_window is not None:
-            history = [
-                (period, value)
-                for period, value in history
-                if params.history_window.start <= period
-                < params.history_window.end
-            ]
-        if len(history) < 3:
+        history = _latest_contiguous_run(requested_history, params.grain)
+        if len(history) < self.min_history_periods:
             return _insufficient(
-                "Insufficient history: at least three complete periods are "
-                "required before the test window.",
+                f"Insufficient history: at least {self.min_history_periods} "
+                "complete consecutive periods are required before the test "
+                "window.",
                 analyst_input,
                 table,
             )
+        if _period_end(history[-1][0], params.grain) != params.test_window.start:
+            return _insufficient(
+                "The history is not contiguous with the test window.",
+                analyst_input,
+                table,
+            )
+        sparse_history = len(history) != len(requested_history)
+
+        observation_count = None
+        if volume_index is not None:
+            try:
+                observation_count = math.fsum(
+                    volumes.get(period, 0.0) for period, _ in history
+                ) + math.fsum(
+                    volumes.get(period, 0.0) for period, _ in test_rows
+                )
+            except OverflowError:
+                return _insufficient(
+                    "The observation volume overflows while being aggregated.",
+                    analyst_input,
+                    table,
+                )
+            if not math.isfinite(observation_count):
+                return _insufficient(
+                    "The observation volume is not finite.",
+                    analyst_input,
+                    table,
+                )
+            if observation_count < self.min_observations:
+                return _insufficient(
+                    "Insufficient observations: at least "
+                    f"{self.min_observations} volume-weighted observations "
+                    "are required for an anomaly call.",
+                    analyst_input,
+                    table,
+                )
 
         baseline = _baseline(history, test_rows[0][0], params.grain)
         expected = baseline.expected
         scale = baseline.scale
+        if not math.isfinite(expected) or not math.isfinite(scale) or scale <= 0.0:
+            return _insufficient(
+                "The baseline is not finite; a stable baseline is required.",
+                analyst_input,
+                table,
+            )
+        if abs(expected) <= self.zero_baseline_tolerance:
+            return _insufficient(
+                "The baseline is zero or near zero; percentage and robust-score "
+                "changes would be misleading.",
+                analyst_input,
+                table,
+            )
+
         threshold = max(
             2.5, NormalDist().inv_cdf(1.0 - params.alpha / 2.0)
         )
         low = expected - threshold * scale
         high = expected + threshold * scale
         score = (actual - expected) / scale
-        deviation_pct = (
-            (actual - expected) / expected * 100.0 if expected != 0 else 0.0
-        )
+        deviation_pct = (actual - expected) / expected * 100.0
+        if not all(
+            math.isfinite(item)
+            for item in (actual, expected, scale, threshold, low, high, score, deviation_pct)
+        ):
+            return _insufficient(
+                "The anomaly calculation produced a non-finite value.",
+                analyst_input,
+                table,
+            )
         verdict = "unusual" if actual < low or actual > high else "within_normal_range"
+        analysis_series = sorted(history + test_rows)
         persistence = _persistence(
-            series,
+            analysis_series,
             test_window=params.test_window,
             low=low,
             high=high,
@@ -121,9 +238,22 @@ class AnomalyAnalyst:
         assumptions = [
             "The test window is excluded from the baseline.",
             baseline.note,
-            "A PELT-style two-segment change check distinguishes one-off "
-            "spikes from sustained shifts; no other series were scanned.",
+            "The change check is a two-segment sum-of-squares scan, not PELT.",
+            "No calendar adjustment was applied; use_calendar is retained for "
+            "contract compatibility.",
+            "No multiple-testing correction was applied because only one "
+            "series was scanned.",
         ]
+        if sparse_history:
+            assumptions.append(
+                "Earlier sparse history was excluded; the baseline uses the "
+                "most recent contiguous run."
+            )
+        if volume_index is None:
+            assumptions.append(
+                "No volume column was supplied, so the observation-count guard "
+                "was not applied."
+            )
         if params.series_dimension is not None:
             assumptions.append(
                 f"The analysis covers the series dimension "
@@ -133,7 +263,7 @@ class AnomalyAnalyst:
         result = AnomalyResult(
             verdict=verdict,
             window=_window_label(params),
-            actual=actual,
+            actual=float(actual),
             expected=float(expected),
             expected_range=(float(low), float(high)),
             deviation_pct=float(deviation_pct),
@@ -148,7 +278,7 @@ class AnomalyAnalyst:
             module="anomaly",
             status="ok",
             result=result,
-            parameters=_parameter_dict(params),
+            parameters=_parameter_dict(params, self, observation_count),
             assumptions=tuple(assumptions),
             sources=(table.query_id,),
         )
@@ -299,39 +429,74 @@ def _change_point(values: np.ndarray) -> int | None:
     return None
 
 
-def _series_columns(table: TableRef) -> tuple[int, int] | None:
+def _series_columns(
+    table: TableRef,
+    metric: str,
+) -> tuple[int, int, int | None] | None:
     time_index = None
-    value_index = None
+    measures: list[tuple[int, str, str]] = []
     for index, column in enumerate(table.columns):
         name = column.name.lower()
         role = column.role
         if time_index is None and (
             role == "time"
-            or name in {"month", "period", "date", "week", "quarter", "year"}
+            or name in _TIME_NAMES
             or name.endswith("_date")
             or name.endswith("_month")
         ):
             time_index = index
-        if value_index is None and (
+            continue
+        if (
             role == "measure"
             or name in {"value", "measure", "order_count", "revenue", "orders"}
         ):
-            value_index = index
-    if time_index is None or value_index is None:
+            measures.append((index, name, role))
+
+    if time_index is None or not measures:
         return None
-    return time_index, value_index
+
+    metric_name = metric.lower()
+    value_index = next(
+        (index for index, name, _ in measures if name == metric_name),
+        None,
+    )
+    if value_index is None:
+        non_volume = [
+            index
+            for index, name, _ in measures
+            if name not in _VOLUME_NAMES
+        ]
+        value_index = non_volume[0] if non_volume else measures[0][0]
+
+    volume_index = next(
+        (
+            index
+            for index, name, _ in measures
+            if index != value_index and name in _VOLUME_NAMES
+        ),
+        None,
+    )
+    return time_index, value_index, volume_index
 
 
 def _aggregate_series(
     table: TableRef,
     time_index: int,
     value_index: int,
+    volume_index: int | None,
     grain: str,
-) -> list[tuple[date, float]]:
-    grouped: dict[date, float] = {}
+) -> tuple[
+    list[tuple[date, float]],
+    dict[date, float],
+    str | None,
+]:
+    grouped: dict[date, list[float]] = {}
+    volumes: dict[date, list[float]] = {}
     for row in table.rows:
-        if time_index >= len(row) or value_index >= len(row):
+        if max(time_index, value_index) >= len(row):
             continue
+        if volume_index is not None and volume_index >= len(row):
+            return [], {}, "The series row is missing its volume value."
         period = _period_start(row[time_index], grain)
         if period is None:
             continue
@@ -339,8 +504,90 @@ def _aggregate_series(
             value = float(row[value_index])
         except (TypeError, ValueError):
             continue
-        grouped[period] = grouped.get(period, 0.0) + value
-    return sorted(grouped.items())
+        if not math.isfinite(value):
+            return (
+                [],
+                {},
+                "The series contains a non-finite measure value; finite values "
+                "are required.",
+            )
+        grouped.setdefault(period, []).append(value)
+
+        if volume_index is not None:
+            try:
+                volume = float(row[volume_index])
+            except (TypeError, ValueError):
+                return [], {}, "The series contains a non-numeric volume value."
+            if not math.isfinite(volume):
+                return (
+                    [],
+                    {},
+                    "The series contains a non-finite volume value; finite "
+                    "values are required.",
+                )
+            if volume < 0.0:
+                return (
+                    [],
+                    {},
+                    "The series contains a negative volume value; observation "
+                    "counts must be non-negative.",
+                )
+            volumes.setdefault(period, []).append(volume)
+
+    series: list[tuple[date, float]] = []
+    for period in sorted(grouped):
+        try:
+            total = math.fsum(sorted(grouped[period]))
+        except OverflowError:
+            return [], {}, "The series values overflow while being aggregated."
+        series.append((period, total))
+
+    volume_totals: dict[date, float] = {}
+    for period in sorted(volumes):
+        try:
+            volume_totals[period] = math.fsum(sorted(volumes[period]))
+        except OverflowError:
+            return [], {}, "The volumes overflow while being aggregated."
+    return series, volume_totals, None
+
+
+def _complete_periods(
+    series: list[tuple[date, float]],
+    window,
+    grain: str,
+) -> list[tuple[date, float]]:
+    return [
+        (period, value)
+        for period, value in series
+        if window.start <= period < window.end
+        and _period_end(period, grain) <= window.end
+    ]
+
+
+def _periods_in_window(window, grain: str) -> list[date]:
+    current = _truncate(window.start, grain)
+    if current < window.start:
+        current = _period_end(current, grain)
+    periods: list[date] = []
+    while current < window.end:
+        if _period_end(current, grain) <= window.end:
+            periods.append(current)
+        current = _period_end(current, grain)
+    return periods
+
+
+def _latest_contiguous_run(
+    series: list[tuple[date, float]],
+    grain: str,
+) -> list[tuple[date, float]]:
+    if not series:
+        return []
+    start = len(series) - 1
+    while start > 0 and (
+        _period_end(series[start - 1][0], grain) == series[start][0]
+    ):
+        start -= 1
+    return series[start:]
 
 
 def _period_start(value: object, grain: str) -> date | None:
@@ -383,11 +630,33 @@ def _truncate(value: date, grain: str) -> date:
     return value
 
 
+def _period_end(start: date, grain: str) -> date:
+    if grain == "year":
+        return date(start.year + 1, 1, 1)
+    if grain == "quarter":
+        month = start.month + 3
+        year = start.year + (month - 1) // 12
+        month = (month - 1) % 12 + 1
+        return date(year, month, 1)
+    if grain == "month":
+        month = start.month + 1
+        year = start.year + (month - 1) // 12
+        month = (month - 1) % 12 + 1
+        return date(year, month, 1)
+    if grain == "week":
+        return start + timedelta(days=7)
+    return start + timedelta(days=1)
+
+
 def _window_label(params: AnomalyParams) -> str:
     return f"{params.test_window.start.isoformat()}/{params.test_window.end.isoformat()}"
 
 
-def _parameter_dict(params: AnomalyParams) -> dict[str, object]:
+def _parameter_dict(
+    params: AnomalyParams,
+    analyst: AnomalyAnalyst,
+    observation_count: float | None,
+) -> dict[str, object]:
     return {
         "metric": params.metric,
         "grain": params.grain,
@@ -402,6 +671,10 @@ def _parameter_dict(params: AnomalyParams) -> dict[str, object]:
         "alpha": params.alpha,
         "min_volume": params.min_volume,
         "use_calendar": params.use_calendar,
+        "min_history_periods": analyst.min_history_periods,
+        "min_observations": analyst.min_observations,
+        "zero_baseline_tolerance": analyst.zero_baseline_tolerance,
+        "observation_count": observation_count,
     }
 
 
